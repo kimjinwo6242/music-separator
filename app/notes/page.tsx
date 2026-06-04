@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { fileStore } from '@/app/lib/fileStore'
 import { analyzePitch, NoteFrame } from '@/app/lib/pitchDetection'
@@ -16,8 +16,8 @@ function noteClass(note: string): string {
 }
 
 function drawPianoRoll(canvas: HTMLCanvasElement, frames: NoteFrame[]) {
-  const MIDI_MIN = 36  // C2
-  const MIDI_MAX = 84  // C6
+  const MIDI_MIN = 36
+  const MIDI_MAX = 84
   const ROWS = MIDI_MAX - MIDI_MIN
   const ROW_H = 5
   const H = ROWS * ROW_H
@@ -31,7 +31,6 @@ function drawPianoRoll(canvas: HTMLCanvasElement, frames: NoteFrame[]) {
   ctx.fillStyle = '#0d0d0f'
   ctx.fillRect(0, 0, W, H)
 
-  // 가이드 라인 (옥타브 경계)
   ctx.strokeStyle = 'rgba(255,255,255,0.06)'
   ctx.lineWidth = 1
   for (let midi = MIDI_MIN; midi <= MIDI_MAX; midi += 12) {
@@ -39,55 +38,132 @@ function drawPianoRoll(canvas: HTMLCanvasElement, frames: NoteFrame[]) {
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke()
   }
 
-  // 노트 그리기
   for (let col = 0; col < W; col++) {
     const frame = frames[Math.floor(col * step)]
     if (!frame.midi || !frame.note) continue
     const midi = frame.midi
     if (midi < MIDI_MIN || midi > MIDI_MAX) continue
-
     const y = H - (midi - MIDI_MIN + 1) * ROW_H
-    const nc = noteClass(frame.note)
-    ctx.fillStyle = NOTE_COLORS[nc] ?? '#a29bfe'
+    ctx.fillStyle = NOTE_COLORS[noteClass(frame.note)] ?? '#a29bfe'
     ctx.fillRect(col, y, 1, ROW_H)
   }
 }
 
+function fmt(s: number) {
+  return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
+}
+
 export default function NotesPage() {
-  const router     = useRouter()
+  const router = useRouter()
+
+  // 분석
   const canvasRef  = useRef<HTMLCanvasElement>(null)
   const [fileName, setFileName] = useState('')
   const [progress, setProgress] = useState(0)
   const [done, setDone]         = useState(false)
   const [error, setError]       = useState('')
   const [topNotes, setTopNotes] = useState<{ note: string; count: number }[]>([])
-  const [duration, setDuration] = useState(0)
 
+  // 오디오
+  const audioRef       = useRef<HTMLAudioElement | null>(null)
+  const rafRef         = useRef<number>(0)
+  const fileRef        = useRef<File | null>(null)
+  const [playing, setPlaying]   = useState(false)
+  const [audioDur, setAudioDur] = useState(0)
+
+  // DOM ref로 직접 업데이트 (re-render 없이 60fps)
+  const playheadRef    = useRef<HTMLDivElement>(null)
+  const seekFillRef    = useRef<HTMLDivElement>(null)
+  const timeRef        = useRef<HTMLSpanElement>(null)
+
+  // 분석
   useEffect(() => {
     const file = fileStore.get()
     if (!file) { router.replace('/'); return }
     setFileName(file.name)
+    fileRef.current = file
 
     analyzePitch(file, setProgress).then(frames => {
-      if (frames.length > 0) setDuration(frames[frames.length - 1].time)
-
-      // 빈도 집계
       const counts: Record<string, number> = {}
       for (const f of frames) {
         if (f.note) counts[f.note] = (counts[f.note] ?? 0) + 1
       }
-      const sorted = Object.entries(counts)
-        .map(([note, count]) => ({ note, count }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 20)
-      setTopNotes(sorted)
-
+      setTopNotes(
+        Object.entries(counts)
+          .map(([note, count]) => ({ note, count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 20)
+      )
       drawPianoRoll(canvasRef.current!, frames)
       setDone(true)
     }).catch(() => setError('음 분석에 실패했습니다.'))
   }, [])
 
-  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
+  // 분석 완료 후 오디오 준비
+  useEffect(() => {
+    if (!done || !fileRef.current) return
+    const url = URL.createObjectURL(fileRef.current)
+    const audio = new Audio(url)
+    audioRef.current = audio
+    audio.addEventListener('loadedmetadata', () => setAudioDur(audio.duration))
+    audio.addEventListener('ended', () => {
+      setPlaying(false)
+      cancelAnimationFrame(rafRef.current)
+      updateHead(0)
+    })
+    return () => {
+      audio.pause()
+      URL.revokeObjectURL(url)
+      cancelAnimationFrame(rafRef.current)
+    }
+  }, [done])
+
+  const updateHead = (pct: number) => {
+    if (playheadRef.current)  playheadRef.current.style.left  = `${pct * 100}%`
+    if (seekFillRef.current)  seekFillRef.current.style.width  = `${pct * 100}%`
+    if (timeRef.current) {
+      const audio = audioRef.current
+      timeRef.current.textContent = audio ? fmt(audio.currentTime) : '0:00'
+    }
+  }
+
+  const tick = useCallback(() => {
+    const audio = audioRef.current
+    if (!audio || audio.paused) return
+    updateHead(audio.currentTime / (audio.duration || 1))
+    rafRef.current = requestAnimationFrame(tick)
+  }, [])
+
+  const togglePlay = () => {
+    const audio = audioRef.current
+    if (!audio) return
+    if (playing) {
+      audio.pause()
+      cancelAnimationFrame(rafRef.current)
+      setPlaying(false)
+    } else {
+      audio.play()
+      rafRef.current = requestAnimationFrame(tick)
+      setPlaying(true)
+    }
+  }
+
+  const seekTo = (pct: number) => {
+    const audio = audioRef.current
+    if (!audio || !audio.duration) return
+    audio.currentTime = pct * audio.duration
+    updateHead(pct)
+  }
+
+  const handleRollClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!done) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    seekTo((e.clientX - rect.left) / rect.width)
+  }
+
+  const handleSeekBarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    seekTo(Number(e.target.value) / 1000)
+  }
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-white flex flex-col">
@@ -104,9 +180,6 @@ export default function NotesPage() {
         </button>
         <span className="text-sm text-white/25">|</span>
         <span className="text-sm text-white/50 truncate max-w-sm">{fileName}</span>
-        {done && duration > 0 && (
-          <span className="ml-auto text-xs text-white/25">{fmt(duration)}</span>
-        )}
       </div>
 
       <div className="flex-1 flex flex-col gap-6 p-6 max-w-5xl mx-auto w-full">
@@ -114,17 +187,70 @@ export default function NotesPage() {
           <p className="text-red-400 text-sm">{error}</p>
         ) : (
           <>
-            {/* 피아노 롤 */}
+            {/* 피아노 롤 + 플레이헤드 */}
             <div>
               <p className="text-xs text-white/30 mb-2">피아노 롤 · C2 ~ C6</p>
-              <div className="rounded-xl overflow-hidden border border-white/[0.06] bg-black">
+              <div
+                className="relative rounded-xl overflow-hidden border border-white/[0.06] bg-black cursor-pointer"
+                onClick={handleRollClick}
+              >
                 <canvas
                   ref={canvasRef}
                   className="w-full"
                   style={{ imageRendering: 'pixelated', display: 'block', minHeight: '100px' }}
                 />
+                {/* 플레이헤드 */}
+                <div
+                  ref={playheadRef}
+                  className="absolute inset-y-0 w-px bg-white/70 pointer-events-none"
+                  style={{ left: '0%' }}
+                />
               </div>
             </div>
+
+            {/* 재생 컨트롤 */}
+            {done && (
+              <div className="flex items-center gap-3">
+                {/* 재생/정지 */}
+                <button
+                  onClick={togglePlay}
+                  disabled={audioDur === 0}
+                  className="w-9 h-9 rounded-full bg-white/8 hover:bg-white/15 flex items-center justify-center transition-colors shrink-0 disabled:opacity-30"
+                >
+                  {playing ? (
+                    <svg className="w-3.5 h-3.5 text-white/70" fill="currentColor" viewBox="0 0 24 24">
+                      <rect x="6"  y="4" width="4" height="16" rx="1" />
+                      <rect x="14" y="4" width="4" height="16" rx="1" />
+                    </svg>
+                  ) : (
+                    <svg className="w-3.5 h-3.5 text-white/70 translate-x-px" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
+                  )}
+                </button>
+
+                {/* 현재 시간 */}
+                <span ref={timeRef} className="text-xs text-white/30 tabular-nums shrink-0 w-9 text-right">
+                  0:00
+                </span>
+
+                {/* 시크바 */}
+                <div className="relative flex-1 h-1 group">
+                  <div className="absolute inset-0 rounded-full bg-white/10" />
+                  <div ref={seekFillRef} className="absolute inset-y-0 left-0 rounded-full bg-violet-500" style={{ width: '0%' }} />
+                  <input
+                    type="range" min={0} max={1000} step={1} defaultValue={0}
+                    onChange={handleSeekBarChange}
+                    className="absolute inset-0 w-full opacity-0 cursor-pointer h-full"
+                  />
+                </div>
+
+                {/* 전체 시간 */}
+                <span className="text-xs text-white/25 tabular-nums shrink-0 w-9">
+                  {fmt(audioDur)}
+                </span>
+              </div>
+            )}
 
             {/* 진행 상태 */}
             {!done && (
@@ -148,17 +274,13 @@ export default function NotesPage() {
                 <p className="text-xs text-white/30 mb-3">감지된 음 (빈도순)</p>
                 <div className="flex flex-wrap gap-2">
                   {topNotes.map(({ note, count }) => {
-                    const nc = noteClass(note)
-                    const color = NOTE_COLORS[nc] ?? '#a29bfe'
+                    const color = NOTE_COLORS[noteClass(note)] ?? '#a29bfe'
                     return (
                       <div
                         key={note}
                         className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-white/[0.06] bg-white/[0.03]"
                       >
-                        <span
-                          className="w-2.5 h-2.5 rounded-full shrink-0"
-                          style={{ backgroundColor: color }}
-                        />
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
                         <span className="text-sm font-mono font-medium text-white/80">{note}</span>
                         <span className="text-xs text-white/25">{count}</span>
                       </div>
