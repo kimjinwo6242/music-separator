@@ -237,11 +237,13 @@ export default function DropZone() {
   useEffect(() => { filesStore.set(files) }, [files])
 
   // 녹음
-  const [recording, setRecording]   = useState(false)
-  const [recSecs, setRecSecs]       = useState(0)
-  const [recError, setRecError]     = useState('')
+  const [recording, setRecording]     = useState(false)
+  const [recSecs, setRecSecs]         = useState(0)
+  const [recError, setRecError]       = useState('')
+  const [waitingAudio, setWaitingAudio] = useState(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const recTimerRef      = useRef<ReturnType<typeof setInterval> | null>(null)
+  const levelCtxRef      = useRef<AudioContext | null>(null)
 
   const startRecording = async () => {
     setRecError('')
@@ -269,6 +271,7 @@ export default function DropZone() {
       recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data) }
       recorder.onstop = () => {
         audioStream.getTracks().forEach(t => t.stop())
+        levelCtxRef.current?.close(); levelCtxRef.current = null
         const blob = new Blob(chunks, { type: mimeType })
         const name = `녹음_${new Date().toLocaleTimeString('ko-KR').replace(/:/g, '-')}.webm`
         const file = new File([blob], name, { type: 'audio/webm' })
@@ -276,6 +279,7 @@ export default function DropZone() {
         clearInterval(recTimerRef.current!)
         setRecSecs(0)
         setRecording(false)
+        setWaitingAudio(false)
       }
 
       // 사용자가 Chrome 공유 표시줄에서 직접 중지할 때
@@ -288,6 +292,28 @@ export default function DropZone() {
       setRecording(true)
       setRecSecs(0)
       recTimerRef.current = setInterval(() => setRecSecs(s => s + 1), 1000)
+
+      // 오디오 레벨 감지 — 소리가 들어올 때까지 안내 표시
+      setWaitingAudio(true)
+      const levelCtx = new AudioContext()
+      levelCtxRef.current = levelCtx
+      const src      = levelCtx.createMediaStreamSource(audioStream)
+      const analyser = levelCtx.createAnalyser()
+      analyser.fftSize = 256
+      src.connect(analyser)
+      const buf = new Uint8Array(analyser.frequencyBinCount)
+      const check = () => {
+        if (!levelCtxRef.current) return
+        analyser.getByteFrequencyData(buf)
+        const avg = buf.reduce((a, b) => a + b, 0) / buf.length
+        if (avg > 4) {
+          setWaitingAudio(false)
+          levelCtx.close(); levelCtxRef.current = null
+        } else {
+          requestAnimationFrame(check)
+        }
+      }
+      requestAnimationFrame(check)
     } catch {
       // 사용자가 다이얼로그를 취소한 경우 에러 없이 조용히 종료
     }
@@ -409,23 +435,33 @@ export default function DropZone() {
           {recError && <p className="text-xs text-red-400 text-center">{recError}</p>}
         </div>
       ) : (
-        <div className="flex items-center justify-between px-5 py-3.5 rounded-xl bg-red-500/[0.07] border border-red-500/20">
-          <div className="flex items-center gap-3">
-            <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shrink-0" />
-            <span className="text-sm text-red-400 font-medium">녹음 중</span>
-            <span className="text-sm text-white/50 tabular-nums">
-              {`${Math.floor(recSecs / 60)}:${String(recSecs % 60).padStart(2, '0')}`}
-            </span>
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between px-5 py-3.5 rounded-xl bg-red-500/[0.07] border border-red-500/20">
+            <div className="flex items-center gap-3">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shrink-0" />
+              <span className="text-sm text-red-400 font-medium">녹음 중</span>
+              <span className="text-sm text-white/50 tabular-nums">
+                {`${Math.floor(recSecs / 60)}:${String(recSecs % 60).padStart(2, '0')}`}
+              </span>
+            </div>
+            <button
+              onClick={stopRecording}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs font-medium transition-colors"
+            >
+              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                <rect x="4" y="4" width="16" height="16" rx="2" />
+              </svg>
+              정지
+            </button>
           </div>
-          <button
-            onClick={stopRecording}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs font-medium transition-colors"
-          >
-            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
-              <rect x="4" y="4" width="16" height="16" rx="2" />
-            </svg>
-            정지
-          </button>
+          {waitingAudio && (
+            <div className="flex items-center gap-2.5 px-5 py-3 rounded-xl bg-amber-500/[0.07] border border-amber-500/20">
+              <svg className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072M12 18.364A9 9 0 1012 5.636" />
+              </svg>
+              <span className="text-sm text-amber-400">선택한 탭에서 재생을 시작해 주세요 — 소리가 감지되면 이 안내가 사라집니다</span>
+            </div>
+          )}
         </div>
       )}
 
