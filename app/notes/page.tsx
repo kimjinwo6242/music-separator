@@ -120,25 +120,24 @@ export default function NotesPage() {
   }, [done])
 
   const updateHead = (pct: number) => {
-    const canvas = canvasRef.current
-    const canvasW = canvas ? canvas.width : 0
-
-    // 픽셀 기반 포지셔닝 — left:% 는 CSS 너비(뷰포트 크기) 기준이라 틀림
-    if (playheadRef.current && canvasW > 0) {
-      playheadRef.current.style.left = `${pct * canvasW}px`
-    }
-
-    // 재생 중 자동 스크롤 — 플레이헤드가 보이는 영역 밖으로 나가면 따라감
+    const canvas    = canvasRef.current
     const container = scrollContainerRef.current
-    if (container && canvasW > 0) {
-      const px = pct * canvasW
-      const visibleRight = container.scrollLeft + container.clientWidth
-      if (px > visibleRight - 20) {
-        container.scrollLeft = px - container.clientWidth * 0.15
+    const canvasW   = canvas ? canvas.width : 0
+
+    if (canvasW > 0 && container) {
+      const currentPx = pct * canvasW
+      const anchorX   = container.clientWidth / 5   // 화면 1/5 고정 지점
+
+      // 플레이헤드는 항상 캔버스 기준 절대 픽셀
+      if (playheadRef.current) {
+        playheadRef.current.style.left = `${currentPx}px`
       }
+
+      // 앵커 이전: 스크롤 0 유지 / 이후: 그래프가 스크롤되어 줄이 앵커에 고정된 것처럼 보임
+      container.scrollLeft = Math.max(0, currentPx - anchorX)
     }
 
-    if (seekFillRef.current)  seekFillRef.current.style.width = `${pct * 100}%`
+    if (seekFillRef.current) seekFillRef.current.style.width = `${pct * 100}%`
     if (timeRef.current) {
       const audio = audioRef.current
       timeRef.current.textContent = audio ? fmt(audio.currentTime) : '0:00'
