@@ -211,6 +211,11 @@ export default function DropZone() {
     router.push('/spectrogram')
   }
 
+  const openNotes = (file: File) => {
+    fileStore.set(file)
+    router.push('/notes')
+  }
+
   const [files, setFiles]       = useState<UploadedFile[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [dragError, setDragError]   = useState<string | null>(null)
@@ -364,6 +369,15 @@ export default function DropZone() {
                             <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V5m4 14V3m4 16V8M5 19v-4" />
                           </svg>
                           스펙트로그램
+                        </button>
+                        <button
+                          onClick={() => openNotes(entry.file)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/20 text-emerald-400 hover:text-emerald-300 text-xs font-medium transition-colors"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                          </svg>
+                          음 분석
                         </button>
                         <svg className="w-4 h-4 text-emerald-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
