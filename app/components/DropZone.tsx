@@ -1,32 +1,25 @@
 'use client'
 
-import { useState, useCallback, useRef, lazy, Suspense } from 'react'
-import { analyzeAudio } from '@/app/lib/pitchDetection'
-import type { NoteEvent } from '@/app/lib/pitchDetection'
-
-const SheetMusicView = lazy(() => import('./SheetMusicView'))
-
-interface Analysis {
-  status: 'analyzing' | 'done' | 'error'
-  progress: number
-  notes: NoteEvent[]
-  bpm: number
-  error?: string
-}
+import { useState, useCallback, useRef, useEffect } from 'react'
 
 interface UploadedFile {
   id: string
   file: File
-  status: 'idle' | 'uploading' | 'done' | 'error'
+  status: 'idle' | 'uploading' | 'done'
   progress: number
-  analysis?: Analysis
-  showSheet: boolean
 }
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function formatTime(sec: number): string {
+  if (!isFinite(sec)) return '0:00'
+  const m = Math.floor(sec / 60)
+  const s = Math.floor(sec % 60)
+  return `${m}:${s.toString().padStart(2, '0')}`
 }
 
 function FileIcon({ type }: { type: string }) {
@@ -38,27 +31,180 @@ function FileIcon({ type }: { type: string }) {
   )
 }
 
-function AnalysisProgress({ progress }: { progress: number }) {
+// 파일 하나의 오디오 플레이어
+function AudioPlayer({ file }: { file: File }) {
+  const audioRef   = useRef<HTMLAudioElement | null>(null)
+  const srcRef     = useRef<string>('')
+  const [playing, setPlaying]   = useState(false)
+  const [current, setCurrent]   = useState(0)
+  const [duration, setDuration] = useState(0)
+  const [dragging, setDragging] = useState(false)
+  const [volume, setVolume]     = useState(1)
+  const [muted, setMuted]       = useState(false)
+
+  // File → Object URL 생성 (컴포넌트 언마운트 시 해제)
+  useEffect(() => {
+    const url = URL.createObjectURL(file)
+    srcRef.current = url
+    const audio = new Audio(url)
+    audioRef.current = audio
+
+    audio.addEventListener('loadedmetadata', () => setDuration(audio.duration))
+    audio.addEventListener('timeupdate',     () => { if (!dragging) setCurrent(audio.currentTime) })
+    audio.addEventListener('ended',          () => { setPlaying(false); setCurrent(0) })
+
+    return () => {
+      audio.pause()
+      URL.revokeObjectURL(url)
+    }
+  }, [file])
+
+  const togglePlay = () => {
+    const audio = audioRef.current
+    if (!audio) return
+    if (playing) {
+      audio.pause()
+      setPlaying(false)
+    } else {
+      audio.play()
+      setPlaying(true)
+    }
+  }
+
+  const seek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const audio = audioRef.current
+    if (!audio) return
+    const val = Number(e.target.value)
+    audio.currentTime = val
+    setCurrent(val)
+  }
+
+  const changeVolume = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = Number(e.target.value)
+    setVolume(val)
+    setMuted(val === 0)
+    if (audioRef.current) audioRef.current.volume = val
+  }
+
+  const toggleMute = () => {
+    const audio = audioRef.current
+    if (!audio) return
+    if (muted) {
+      const restored = volume === 0 ? 0.8 : volume
+      audio.volume = restored
+      setVolume(restored)
+      setMuted(false)
+    } else {
+      audio.volume = 0
+      setMuted(true)
+    }
+  }
+
+  const pct    = duration > 0 ? (current / duration) * 100 : 0
+  const volPct = muted ? 0 : volume * 100
+
   return (
-    <div className="mt-3 space-y-1.5">
-      <div className="flex justify-between text-xs text-white/30">
-        <span>음정 분석 중…</span>
-        <span>{Math.round(progress * 100)}%</span>
-      </div>
-      <div className="h-1 rounded-full bg-white/5 overflow-hidden">
+    <div className="mt-2.5 space-y-2">
+    <div className="flex items-center gap-3">
+      {/* 재생/정지 */}
+      <button
+        onClick={togglePlay}
+        className="w-8 h-8 rounded-full bg-white/8 hover:bg-white/15 flex items-center justify-center transition-colors shrink-0"
+      >
+        {playing ? (
+          <svg className="w-3.5 h-3.5 text-white/70" fill="currentColor" viewBox="0 0 24 24">
+            <rect x="6"  y="4" width="4" height="16" rx="1" />
+            <rect x="14" y="4" width="4" height="16" rx="1" />
+          </svg>
+        ) : (
+          <svg className="w-3.5 h-3.5 text-white/70 translate-x-px" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M8 5v14l11-7z" />
+          </svg>
+        )}
+      </button>
+
+      {/* 시간 */}
+      <span className="text-xs text-white/30 tabular-nums shrink-0 w-9 text-right">
+        {formatTime(current)}
+      </span>
+
+      {/* 시크 바 */}
+      <div className="relative flex-1 h-1 group">
+        {/* 배경 */}
+        <div className="absolute inset-0 rounded-full bg-white/10" />
+        {/* 재생 위치 */}
         <div
-          className="h-full rounded-full bg-amber-500 transition-all duration-200"
-          style={{ width: `${progress * 100}%` }}
+          className="absolute inset-y-0 left-0 rounded-full bg-violet-500"
+          style={{ width: `${pct}%` }}
+        />
+        <input
+          type="range"
+          min={0}
+          max={duration || 1}
+          step={0.01}
+          value={current}
+          onChange={seek}
+          onMouseDown={() => setDragging(true)}
+          onMouseUp={()   => setDragging(false)}
+          onTouchStart={() => setDragging(true)}
+          onTouchEnd={()   => setDragging(false)}
+          className="absolute inset-0 w-full opacity-0 cursor-pointer h-full"
         />
       </div>
+
+      {/* 전체 시간 */}
+      <span className="text-xs text-white/25 tabular-nums shrink-0 w-9">
+        {formatTime(duration)}
+      </span>
     </div>
+
+    {/* 볼륨 행 */}
+    <div className="flex items-center gap-3 pl-1">
+      {/* 뮤트 / 볼륨 아이콘 */}
+      <button onClick={toggleMute} className="shrink-0 text-white/30 hover:text-white/60 transition-colors">
+        {muted || volPct === 0 ? (
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+          </svg>
+        ) : volPct < 50 ? (
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072" />
+          </svg>
+        ) : (
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15zM17.657 6.343a8 8 0 010 11.314M15.536 8.464a5 5 0 010 7.072" />
+          </svg>
+        )}
+      </button>
+
+      {/* 볼륨 슬라이더 */}
+      <div className="relative w-24 h-1">
+        <div className="absolute inset-0 rounded-full bg-white/10" />
+        <div
+          className="absolute inset-y-0 left-0 rounded-full bg-white/30"
+          style={{ width: `${volPct}%` }}
+        />
+        <input
+          type="range"
+          min={0} max={1} step={0.01}
+          value={muted ? 0 : volume}
+          onChange={changeVolume}
+          className="absolute inset-0 w-full opacity-0 cursor-pointer h-full"
+        />
+      </div>
+
+      <span className="text-xs text-white/25 tabular-nums">{Math.round(volPct)}%</span>
+    </div>
+  </div>
   )
 }
 
 export default function DropZone() {
-  const [files, setFiles] = useState<UploadedFile[]>([])
+  const [files, setFiles]       = useState<UploadedFile[]>([])
   const [isDragging, setIsDragging] = useState(false)
-  const [dragError, setDragError] = useState<string | null>(null)
+  const [dragError, setDragError]   = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const ACCEPTED = ['audio/mpeg', 'audio/wav', 'audio/wave', 'audio/x-wav']
@@ -73,7 +219,7 @@ export default function DropZone() {
     setFiles(prev => {
       const existing = new Set(prev.map(e => e.id))
       const next = valid
-        .map(f => ({ id: `${f.name}-${f.size}-${f.lastModified}`, file: f, status: 'idle' as const, progress: 0, showSheet: false }))
+        .map(f => ({ id: `${f.name}-${f.size}-${f.lastModified}`, file: f, status: 'idle' as const, progress: 0 }))
         .filter(e => !existing.has(e.id))
       return [...prev, ...next]
     })
@@ -93,42 +239,7 @@ export default function DropZone() {
     }, 120)
   }, [])
 
-  const startAnalysis = useCallback(async (id: string) => {
-    const entry = files.find(f => f.id === id)
-    if (!entry) return
-
-    setFiles(prev => prev.map(f => f.id === id
-      ? { ...f, analysis: { status: 'analyzing', progress: 0, notes: [], bpm: 120 }, showSheet: false }
-      : f
-    ))
-
-    try {
-      const { notes, bpm } = await analyzeAudio(entry.file, p =>
-        setFiles(prev => prev.map(f => f.id === id && f.analysis
-          ? { ...f, analysis: { ...f.analysis, progress: p } }
-          : f
-        ))
-      )
-      setFiles(prev => prev.map(f => f.id === id
-        ? { ...f, analysis: { status: 'done', progress: 1, notes, bpm }, showSheet: true }
-        : f
-      ))
-    } catch (err) {
-      setFiles(prev => prev.map(f => f.id === id
-        ? { ...f, analysis: { status: 'error', progress: 0, notes: [], bpm: 120, error: String(err) } }
-        : f
-      ))
-    }
-  }, [files])
-
-  const toggleSheet = (id: string) =>
-    setFiles(prev => prev.map(f => f.id === id ? { ...f, showSheet: !f.showSheet } : f))
-
-  const removeFile = (id: string) =>
-    setFiles(prev => prev.filter(f => f.id !== id))
-
-  const idleCount = files.filter(f => f.status === 'idle').length
-  const doneCount = files.filter(f => f.status === 'done').length
+  const removeFile = (id: string) => setFiles(prev => prev.filter(f => f.id !== id))
 
   const onDragOver  = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true) }
   const onDragLeave = (e: React.DragEvent) => {
@@ -143,9 +254,12 @@ export default function DropZone() {
     e.target.value = ''
   }
 
+  const idleCount = files.filter(f => f.status === 'idle').length
+  const doneCount = files.filter(f => f.status === 'done').length
+
   return (
     <div className="w-full max-w-2xl mx-auto space-y-6">
-      {/* Drop Zone */}
+      {/* 드롭존 */}
       <div
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
@@ -168,7 +282,7 @@ export default function DropZone() {
         />
         <div className={`w-16 h-16 rounded-2xl flex items-center justify-center transition-all duration-200 ${isDragging ? 'bg-violet-500/30' : 'bg-white/5'}`}>
           <svg className={`w-8 h-8 transition-colors ${isDragging ? 'text-violet-300' : 'text-white/40'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
           </svg>
         </div>
         <div>
@@ -181,7 +295,7 @@ export default function DropZone() {
 
       {dragError && <p className="text-sm text-red-400 text-center">{dragError}</p>}
 
-      {/* File List */}
+      {/* 파일 목록 */}
       {files.length > 0 && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
@@ -199,13 +313,12 @@ export default function DropZone() {
             )}
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-2">
             {files.map(entry => (
-              <div key={entry.id} className="rounded-2xl bg-white/[0.04] border border-white/[0.06] overflow-hidden">
-                {/* File row */}
-                <div className="flex items-center gap-3 px-4 py-3">
+              <div key={entry.id} className="rounded-xl bg-white/[0.04] border border-white/[0.06] px-4 py-3">
+                {/* 파일 정보 행 */}
+                <div className="flex items-center gap-3">
                   <FileIcon type={entry.file.type} />
-
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-white/80 truncate">{entry.file.name}</p>
                     <div className="flex items-center gap-2 mt-0.5">
@@ -213,11 +326,8 @@ export default function DropZone() {
                       {entry.status === 'uploading' && (
                         <span className="text-xs text-violet-400">{Math.round(entry.progress)}%</span>
                       )}
-                      {entry.status === 'done' && !entry.analysis && (
-                        <span className="text-xs text-emerald-400">업로드 완료</span>
-                      )}
-                      {entry.analysis?.status === 'done' && (
-                        <span className="text-xs text-amber-400">{entry.analysis.notes.length}개 음표 감지</span>
+                      {entry.status === 'done' && (
+                        <span className="text-xs text-emerald-400">완료</span>
                       )}
                     </div>
                     {entry.status === 'uploading' && (
@@ -225,15 +335,8 @@ export default function DropZone() {
                         <div className="h-full rounded-full bg-violet-500 transition-all duration-100" style={{ width: `${entry.progress}%` }} />
                       </div>
                     )}
-                    {entry.analysis?.status === 'analyzing' && (
-                      <AnalysisProgress progress={entry.analysis.progress} />
-                    )}
-                    {entry.analysis?.status === 'error' && (
-                      <p className="text-xs text-red-400 mt-1">분석 실패: {entry.analysis.error}</p>
-                    )}
                   </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="shrink-0 flex items-center gap-2">
                     {entry.status === 'idle' && (
                       <button
                         onClick={() => simulateUpload(entry.id)}
@@ -242,32 +345,12 @@ export default function DropZone() {
                         업로드
                       </button>
                     )}
-
-                    {entry.status === 'done' && !entry.analysis && (
-                      <button
-                        onClick={() => startAnalysis(entry.id)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/20 text-amber-400 hover:text-amber-300 text-xs font-medium transition-colors"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-                        </svg>
-                        악보 만들기
-                      </button>
+                    {entry.status === 'done' && (
+                      <svg className="w-4 h-4 text-emerald-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
                     )}
-
-                    {entry.analysis?.status === 'done' && (
-                      <button
-                        onClick={() => toggleSheet(entry.id)}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${entry.showSheet ? 'bg-amber-500/20 border-amber-500/30 text-amber-300' : 'bg-white/5 border-white/10 text-white/50 hover:text-white/80'}`}
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-                        </svg>
-                        {entry.showSheet ? '악보 닫기' : '악보 보기'}
-                      </button>
-                    )}
-
-                    {entry.status !== 'uploading' && entry.analysis?.status !== 'analyzing' && (
+                    {entry.status !== 'uploading' && (
                       <button
                         onClick={() => removeFile(entry.id)}
                         className="w-6 h-6 rounded-lg flex items-center justify-center text-white/20 hover:text-white/60 hover:bg-white/5 transition-colors"
@@ -280,26 +363,9 @@ export default function DropZone() {
                   </div>
                 </div>
 
-                {/* Sheet music panel */}
-                {entry.showSheet && entry.analysis?.status === 'done' && (
-                  <div className="border-t border-white/[0.06]">
-                    <div className="px-4 pt-3 pb-1 flex items-center justify-between">
-                      <div>
-                        <span className="text-xs font-medium text-white/50">오선지 악보</span>
-                        <span className="ml-2 text-xs text-white/25">· {entry.analysis.bpm} BPM · 4/4박자 · 단선율 분석</span>
-                      </div>
-                    </div>
-                    <div className="px-2 pb-3">
-                      <Suspense fallback={
-                        <div className="flex items-center justify-center py-8 text-white/30 text-sm">악보 로딩 중…</div>
-                      }>
-                        <SheetMusicView notes={entry.analysis.notes} bpm={entry.analysis.bpm} />
-                      </Suspense>
-                    </div>
-                    <p className="px-4 pb-3 text-xs text-white/20">
-                      * 단선율(멜로디) 기반 분석입니다. 복잡한 화음이나 리듬은 단순화될 수 있습니다.
-                    </p>
-                  </div>
+                {/* 오디오 플레이어 — 업로드 완료 후 표시 */}
+                {entry.status === 'done' && (
+                  <AudioPlayer file={entry.file} />
                 )}
               </div>
             ))}
