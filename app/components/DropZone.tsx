@@ -48,7 +48,22 @@ function AudioPlayer({ file }: { file: File }) {
     const audio = new Audio(url)
     audioRef.current = audio
 
-    audio.addEventListener('loadedmetadata', () => setDuration(audio.duration))
+    audio.addEventListener('loadedmetadata', () => {
+      if (isFinite(audio.duration)) {
+        setDuration(audio.duration)
+      } else {
+        // WebM 녹음 파일은 duration이 Infinity — 끝으로 seek해서 강제 계산
+        audio.currentTime = 1e101
+        const fix = () => {
+          if (isFinite(audio.duration)) {
+            setDuration(audio.duration)
+            audio.currentTime = 0
+            audio.removeEventListener('timeupdate', fix)
+          }
+        }
+        audio.addEventListener('timeupdate', fix)
+      }
+    })
     audio.addEventListener('timeupdate',     () => { if (!dragging) setCurrent(audio.currentTime) })
     audio.addEventListener('ended',          () => { setPlaying(false); setCurrent(0) })
 
