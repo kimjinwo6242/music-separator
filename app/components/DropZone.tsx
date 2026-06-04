@@ -239,11 +239,12 @@ export default function DropZone() {
   // 녹음
   const [recording, setRecording]       = useState(false)
   const [detectingAudio, setDetecting]  = useState(false)
-  const [recSecs, setRecSecs]           = useState(0)
   const [recError, setRecError]         = useState('')
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const recTimerRef      = useRef<ReturnType<typeof setInterval> | null>(null)
-  const levelCtxRef      = useRef<AudioContext | null>(null)
+  const mediaRecorderRef  = useRef<MediaRecorder | null>(null)
+  const recTimerRef       = useRef<ReturnType<typeof setInterval> | null>(null)
+  const levelCtxRef       = useRef<AudioContext | null>(null)
+  const recSecsCountRef   = useRef(0)
+  const recSecsDisplayRef = useRef<HTMLSpanElement | null>(null)
 
   const getAudioStream = async (): Promise<MediaStream | null> => {
     const stream = await navigator.mediaDevices.getDisplayMedia({
@@ -268,23 +269,29 @@ export default function DropZone() {
     recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data) }
     recorder.onstop = () => {
       audioStream.getTracks().forEach(t => t.stop())
+      clearInterval(recTimerRef.current!)
       const blob = new Blob(chunks, { type: mimeType })
+      chunks.length = 0  // GC 도움
       const name = `녹음_${new Date().toLocaleTimeString('ko-KR').replace(/:/g, '-')}.webm`
       const file = new File([blob], name, { type: 'audio/webm' })
       setFiles(prev => [...prev, { id: `${name}-${Date.now()}`, file, status: 'done', progress: 100 }])
-      clearInterval(recTimerRef.current!)
-      setRecSecs(0)
       setRecording(false)
     }
     audioStream.getAudioTracks()[0].addEventListener('ended', () => {
       if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop()
     })
 
-    recorder.start(200)
+    recorder.start(1000)  // 200ms → 1000ms: chunk 빈도 줄여 메모리 압박 완화
     mediaRecorderRef.current = recorder
     setRecording(true)
-    setRecSecs(0)
-    recTimerRef.current = setInterval(() => setRecSecs(s => s + 1), 1000)
+    recSecsCountRef.current = 0
+    recTimerRef.current = setInterval(() => {
+      recSecsCountRef.current++
+      const s = recSecsCountRef.current
+      if (recSecsDisplayRef.current)
+        recSecsDisplayRef.current.textContent =
+          `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+    }, 1000)
   }
 
   const startRecording = async () => {
@@ -479,9 +486,7 @@ export default function DropZone() {
           <div className="flex items-center gap-3">
             <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shrink-0" />
             <span className="text-sm text-red-400 font-medium">녹음 중</span>
-            <span className="text-sm text-white/50 tabular-nums">
-              {`${Math.floor(recSecs / 60)}:${String(recSecs % 60).padStart(2, '0')}`}
-            </span>
+            <span ref={recSecsDisplayRef} className="text-sm text-white/50 tabular-nums">0:00</span>
           </div>
           <button
             onClick={stopRecording}
