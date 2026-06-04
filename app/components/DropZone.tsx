@@ -237,64 +237,73 @@ export default function DropZone() {
   useEffect(() => { filesStore.set(files) }, [files])
 
   // 녹음
-  const [recording, setRecording]     = useState(false)
-  const [recSecs, setRecSecs]         = useState(0)
-  const [recError, setRecError]       = useState('')
-  const [waitingAudio, setWaitingAudio] = useState(false)
+  const [recording, setRecording]       = useState(false)
+  const [detectingAudio, setDetecting]  = useState(false)
+  const [recSecs, setRecSecs]           = useState(0)
+  const [recError, setRecError]         = useState('')
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const recTimerRef      = useRef<ReturnType<typeof setInterval> | null>(null)
   const levelCtxRef      = useRef<AudioContext | null>(null)
 
+  const getAudioStream = async (): Promise<MediaStream | null> => {
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      audio: { systemAudio: 'include', echoCancellation: false, noiseSuppression: false, autoGainControl: false } as MediaTrackConstraints,
+      video: true,
+    })
+    stream.getVideoTracks().forEach(t => t.stop())
+    const audioTracks = stream.getAudioTracks()
+    if (audioTracks.length === 0) {
+      setRecError('오디오 트랙을 가져오지 못했습니다. 탭 또는 화면을 공유할 때 "오디오 공유"를 체크하세요.')
+      return null
+    }
+    return new MediaStream(audioTracks)
+  }
+
+  const beginRecording = (audioStream: MediaStream) => {
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus' : 'audio/webm'
+    const recorder = new MediaRecorder(audioStream, { mimeType })
+    const chunks: BlobPart[] = []
+
+    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data) }
+    recorder.onstop = () => {
+      audioStream.getTracks().forEach(t => t.stop())
+      const blob = new Blob(chunks, { type: mimeType })
+      const name = `녹음_${new Date().toLocaleTimeString('ko-KR').replace(/:/g, '-')}.webm`
+      const file = new File([blob], name, { type: 'audio/webm' })
+      setFiles(prev => [...prev, { id: `${name}-${Date.now()}`, file, status: 'done', progress: 100 }])
+      clearInterval(recTimerRef.current!)
+      setRecSecs(0)
+      setRecording(false)
+    }
+    audioStream.getAudioTracks()[0].addEventListener('ended', () => {
+      if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop()
+    })
+
+    recorder.start(200)
+    mediaRecorderRef.current = recorder
+    setRecording(true)
+    setRecSecs(0)
+    recTimerRef.current = setInterval(() => setRecSecs(s => s + 1), 1000)
+  }
+
   const startRecording = async () => {
     setRecError('')
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        audio: { systemAudio: 'include', echoCancellation: false, noiseSuppression: false, autoGainControl: false } as MediaTrackConstraints,
-        video: true,
-      })
+      const audioStream = await getAudioStream()
+      if (!audioStream) return
+      beginRecording(audioStream)
+    } catch { /* 사용자 취소 */ }
+  }
 
-      // 비디오 트랙은 즉시 제거 (오디오만 필요)
-      stream.getVideoTracks().forEach(t => t.stop())
+  const startDetectRecording = async () => {
+    setRecError('')
+    try {
+      const audioStream = await getAudioStream()
+      if (!audioStream) return
 
-      const audioTracks = stream.getAudioTracks()
-      if (audioTracks.length === 0) {
-        setRecError('오디오 트랙을 가져오지 못했습니다. 탭 또는 화면을 공유할 때 "오디오 공유"를 체크하세요.')
-        return
-      }
+      setDetecting(true)
 
-      const audioStream = new MediaStream(audioTracks)
-      const mimeType    = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus' : 'audio/webm'
-      const recorder    = new MediaRecorder(audioStream, { mimeType })
-      const chunks: BlobPart[] = []
-
-      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data) }
-      recorder.onstop = () => {
-        audioStream.getTracks().forEach(t => t.stop())
-        levelCtxRef.current?.close(); levelCtxRef.current = null
-        const blob = new Blob(chunks, { type: mimeType })
-        const name = `녹음_${new Date().toLocaleTimeString('ko-KR').replace(/:/g, '-')}.webm`
-        const file = new File([blob], name, { type: 'audio/webm' })
-        setFiles(prev => [...prev, { id: `${name}-${Date.now()}`, file, status: 'done', progress: 100 }])
-        clearInterval(recTimerRef.current!)
-        setRecSecs(0)
-        setRecording(false)
-        setWaitingAudio(false)
-      }
-
-      // 사용자가 Chrome 공유 표시줄에서 직접 중지할 때
-      audioTracks[0].addEventListener('ended', () => {
-        if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop()
-      })
-
-      recorder.start(200)
-      mediaRecorderRef.current = recorder
-      setRecording(true)
-      setRecSecs(0)
-      recTimerRef.current = setInterval(() => setRecSecs(s => s + 1), 1000)
-
-      // 오디오 레벨 감지 — 소리가 들어올 때까지 안내 표시
-      setWaitingAudio(true)
       const levelCtx = new AudioContext()
       levelCtxRef.current = levelCtx
       const src      = levelCtx.createMediaStreamSource(audioStream)
@@ -302,21 +311,26 @@ export default function DropZone() {
       analyser.fftSize = 256
       src.connect(analyser)
       const buf = new Uint8Array(analyser.frequencyBinCount)
+
       const check = () => {
-        if (!levelCtxRef.current) return
+        if (!levelCtxRef.current) return  // 취소됨
         analyser.getByteFrequencyData(buf)
         const avg = buf.reduce((a, b) => a + b, 0) / buf.length
         if (avg > 4) {
-          setWaitingAudio(false)
           levelCtx.close(); levelCtxRef.current = null
+          setDetecting(false)
+          beginRecording(audioStream)
         } else {
           requestAnimationFrame(check)
         }
       }
       requestAnimationFrame(check)
-    } catch {
-      // 사용자가 다이얼로그를 취소한 경우 에러 없이 조용히 종료
-    }
+    } catch { /* 사용자 취소 */ }
+  }
+
+  const cancelDetecting = () => {
+    levelCtxRef.current?.close(); levelCtxRef.current = null
+    setDetecting(false)
   }
 
   const stopRecording = () => {
@@ -418,50 +432,66 @@ export default function DropZone() {
         <div className="flex-1 h-px bg-white/[0.06]" />
       </div>
 
-      {/* 루프백 녹음 */}
-      {!recording ? (
+      {/* 녹음 */}
+      {!recording && !detectingAudio ? (
         <div className="flex flex-col items-center gap-3">
-          <button
-            onClick={startRecording}
-            className="flex items-center gap-2.5 px-5 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.07] border border-white/[0.07] text-white/60 hover:text-white/80 text-sm font-medium transition-colors"
-          >
-            <span className="w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" />
-            시스템 오디오 녹음
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={startRecording}
+              className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.07] border border-white/[0.07] text-white/60 hover:text-white/80 text-sm font-medium transition-colors"
+            >
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" />
+              시스템 오디오 녹음
+            </button>
+            <button
+              onClick={startDetectRecording}
+              className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.07] border border-white/[0.07] text-white/60 hover:text-white/80 text-sm font-medium transition-colors"
+            >
+              <svg className="w-3.5 h-3.5 text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072M12 18.364A9 9 0 1012 5.636" />
+              </svg>
+              소리 감지 녹음
+            </button>
+          </div>
           <p className="text-xs text-white/20 text-center">
-            다른 탭에서 음악을 틀고 녹음을 시작하세요.<br />
-            화면 공유 다이얼로그에서 해당 탭을 선택하면 그 탭의 오디오가 녹음됩니다.
+            화면 공유 다이얼로그에서 녹음할 탭을 선택하세요
           </p>
           {recError && <p className="text-xs text-red-400 text-center">{recError}</p>}
         </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between px-5 py-3.5 rounded-xl bg-red-500/[0.07] border border-red-500/20">
-            <div className="flex items-center gap-3">
-              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shrink-0" />
-              <span className="text-sm text-red-400 font-medium">녹음 중</span>
-              <span className="text-sm text-white/50 tabular-nums">
-                {`${Math.floor(recSecs / 60)}:${String(recSecs % 60).padStart(2, '0')}`}
-              </span>
-            </div>
-            <button
-              onClick={stopRecording}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs font-medium transition-colors"
-            >
-              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
-                <rect x="4" y="4" width="16" height="16" rx="2" />
-              </svg>
-              정지
-            </button>
+      ) : detectingAudio ? (
+        <div className="flex items-center justify-between px-5 py-3.5 rounded-xl bg-amber-500/[0.07] border border-amber-500/20">
+          <div className="flex items-center gap-3">
+            <svg className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072M12 18.364A9 9 0 1012 5.636" />
+            </svg>
+            <span className="text-sm text-amber-400 font-medium">소리 감지 대기 중</span>
+            <span className="text-xs text-white/30">소리가 들리면 자동으로 녹음을 시작합니다</span>
           </div>
-          {waitingAudio && (
-            <div className="flex items-center gap-2.5 px-5 py-3 rounded-xl bg-amber-500/[0.07] border border-amber-500/20">
-              <svg className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072M12 18.364A9 9 0 1012 5.636" />
-              </svg>
-              <span className="text-sm text-amber-400">선택한 탭에서 재생을 시작해 주세요 — 소리가 감지되면 이 안내가 사라집니다</span>
-            </div>
-          )}
+          <button
+            onClick={cancelDetecting}
+            className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/40 hover:text-white/70 text-xs font-medium transition-colors"
+          >
+            취소
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between px-5 py-3.5 rounded-xl bg-red-500/[0.07] border border-red-500/20">
+          <div className="flex items-center gap-3">
+            <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shrink-0" />
+            <span className="text-sm text-red-400 font-medium">녹음 중</span>
+            <span className="text-sm text-white/50 tabular-nums">
+              {`${Math.floor(recSecs / 60)}:${String(recSecs % 60).padStart(2, '0')}`}
+            </span>
+          </div>
+          <button
+            onClick={stopRecording}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs font-medium transition-colors"
+          >
+            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+              <rect x="4" y="4" width="16" height="16" rx="2" />
+            </svg>
+            정지
+          </button>
         </div>
       )}
 
