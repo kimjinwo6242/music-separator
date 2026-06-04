@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useCallback, useRef, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { fileStore } from '@/app/lib/fileStore'
 
 interface UploadedFile {
   id: string
@@ -202,6 +204,13 @@ function AudioPlayer({ file }: { file: File }) {
 }
 
 export default function DropZone() {
+  const router = useRouter()
+
+  const openSpectrogram = (file: File) => {
+    fileStore.set(file)
+    router.push('/spectrogram')
+  }
+
   const [files, setFiles]       = useState<UploadedFile[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [dragError, setDragError]   = useState<string | null>(null)
@@ -346,9 +355,20 @@ export default function DropZone() {
                       </button>
                     )}
                     {entry.status === 'done' && (
-                      <svg className="w-4 h-4 text-emerald-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                      </svg>
+                      <>
+                        <button
+                          onClick={() => openSpectrogram(entry.file)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-500/15 hover:bg-violet-500/25 border border-violet-500/20 text-violet-400 hover:text-violet-300 text-xs font-medium transition-colors"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V5m4 14V3m4 16V8M5 19v-4" />
+                          </svg>
+                          스펙트로그램
+                        </button>
+                        <svg className="w-4 h-4 text-emerald-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      </>
                     )}
                     {entry.status !== 'uploading' && (
                       <button
