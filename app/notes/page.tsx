@@ -70,6 +70,8 @@ export default function NotesPage() {
   const fileRef        = useRef<File | null>(null)
   const [playing, setPlaying]   = useState(false)
   const [audioDur, setAudioDur] = useState(0)
+  const [volume, setVolume]     = useState(1)
+  const [muted, setMuted]       = useState(false)
 
   // DOM ref로 직접 업데이트 (re-render 없이 60fps)
   const playheadRef       = useRef<HTMLDivElement>(null)
@@ -165,6 +167,27 @@ export default function NotesPage() {
     }
   }
 
+  const changeVolume = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = Number(e.target.value)
+    setVolume(val)
+    setMuted(val === 0)
+    if (audioRef.current) audioRef.current.volume = val
+  }
+
+  const toggleMute = () => {
+    const audio = audioRef.current
+    if (!audio) return
+    if (muted) {
+      const restored = volume === 0 ? 0.8 : volume
+      audio.volume = restored
+      setVolume(restored)
+      setMuted(false)
+    } else {
+      audio.volume = 0
+      setMuted(true)
+    }
+  }
+
   const seekTo = (pct: number) => {
     const audio = audioRef.current
     if (!audio || !audio.duration) return
@@ -236,45 +259,86 @@ export default function NotesPage() {
 
             {/* 재생 컨트롤 */}
             {done && (
-              <div className="flex items-center gap-3">
-                {/* 재생/정지 */}
-                <button
-                  onClick={togglePlay}
-                  disabled={audioDur === 0}
-                  className="w-9 h-9 rounded-full bg-white/8 hover:bg-white/15 flex items-center justify-center transition-colors shrink-0 disabled:opacity-30"
-                >
-                  {playing ? (
-                    <svg className="w-3.5 h-3.5 text-white/70" fill="currentColor" viewBox="0 0 24 24">
-                      <rect x="6"  y="4" width="4" height="16" rx="1" />
-                      <rect x="14" y="4" width="4" height="16" rx="1" />
-                    </svg>
-                  ) : (
-                    <svg className="w-3.5 h-3.5 text-white/70 translate-x-px" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M8 5v14l11-7z" />
-                    </svg>
-                  )}
-                </button>
+              <div className="space-y-2">
+                <div className="flex items-center gap-3">
+                  {/* 재생/정지 */}
+                  <button
+                    onClick={togglePlay}
+                    disabled={audioDur === 0}
+                    className="w-9 h-9 rounded-full bg-white/8 hover:bg-white/15 flex items-center justify-center transition-colors shrink-0 disabled:opacity-30"
+                  >
+                    {playing ? (
+                      <svg className="w-3.5 h-3.5 text-white/70" fill="currentColor" viewBox="0 0 24 24">
+                        <rect x="6"  y="4" width="4" height="16" rx="1" />
+                        <rect x="14" y="4" width="4" height="16" rx="1" />
+                      </svg>
+                    ) : (
+                      <svg className="w-3.5 h-3.5 text-white/70 translate-x-px" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M8 5v14l11-7z" />
+                      </svg>
+                    )}
+                  </button>
 
-                {/* 현재 시간 */}
-                <span ref={timeRef} className="text-xs text-white/30 tabular-nums shrink-0 w-9 text-right">
-                  0:00
-                </span>
+                  {/* 현재 시간 */}
+                  <span ref={timeRef} className="text-xs text-white/30 tabular-nums shrink-0 w-9 text-right">
+                    0:00
+                  </span>
 
-                {/* 시크바 */}
-                <div className="relative flex-1 h-1 group">
-                  <div className="absolute inset-0 rounded-full bg-white/10" />
-                  <div ref={seekFillRef} className="absolute inset-y-0 left-0 rounded-full bg-violet-500" style={{ width: '0%' }} />
-                  <input
-                    type="range" min={0} max={1000} step={1} defaultValue={0}
-                    onChange={handleSeekBarChange}
-                    className="absolute inset-0 w-full opacity-0 cursor-pointer h-full"
-                  />
+                  {/* 시크바 */}
+                  <div className="relative flex-1 h-1 group">
+                    <div className="absolute inset-0 rounded-full bg-white/10" />
+                    <div ref={seekFillRef} className="absolute inset-y-0 left-0 rounded-full bg-violet-500" style={{ width: '0%' }} />
+                    <input
+                      type="range" min={0} max={1000} step={1} defaultValue={0}
+                      onChange={handleSeekBarChange}
+                      className="absolute inset-0 w-full opacity-0 cursor-pointer h-full"
+                    />
+                  </div>
+
+                  {/* 전체 시간 */}
+                  <span className="text-xs text-white/25 tabular-nums shrink-0 w-9">
+                    {fmt(audioDur)}
+                  </span>
                 </div>
 
-                {/* 전체 시간 */}
-                <span className="text-xs text-white/25 tabular-nums shrink-0 w-9">
-                  {fmt(audioDur)}
-                </span>
+                {/* 볼륨 행 */}
+                <div className="flex items-center gap-3 pl-1">
+                  <button onClick={toggleMute} className="shrink-0 text-white/30 hover:text-white/60 transition-colors">
+                    {muted || volume === 0 ? (
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                      </svg>
+                    ) : volume < 0.5 ? (
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072" />
+                      </svg>
+                    ) : (
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15zM17.657 6.343a8 8 0 010 11.314M15.536 8.464a5 5 0 010 7.072" />
+                      </svg>
+                    )}
+                  </button>
+
+                  <div className="relative w-24 h-1">
+                    <div className="absolute inset-0 rounded-full bg-white/10" />
+                    <div
+                      className="absolute inset-y-0 left-0 rounded-full bg-white/30"
+                      style={{ width: `${(muted ? 0 : volume) * 100}%` }}
+                    />
+                    <input
+                      type="range" min={0} max={1} step={0.01}
+                      value={muted ? 0 : volume}
+                      onChange={changeVolume}
+                      className="absolute inset-0 w-full opacity-0 cursor-pointer h-full"
+                    />
+                  </div>
+
+                  <span className="text-xs text-white/25 tabular-nums">
+                    {Math.round((muted ? 0 : volume) * 100)}%
+                  </span>
+                </div>
               </div>
             )}
 
