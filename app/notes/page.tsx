@@ -190,21 +190,24 @@ export default function NotesPage() {
             {/* 피아노 롤 + 플레이헤드 */}
             <div>
               <p className="text-xs text-white/30 mb-2">피아노 롤 · C2 ~ C6</p>
-              <div
-                className="relative rounded-xl overflow-hidden border border-white/[0.06] bg-black cursor-pointer"
-                onClick={handleRollClick}
-              >
-                <canvas
-                  ref={canvasRef}
-                  className="w-full"
-                  style={{ imageRendering: 'pixelated', display: 'block', minHeight: '100px' }}
-                />
-                {/* 플레이헤드 */}
+              {/* 가로 스크롤 wrapper */}
+              <div className="overflow-x-auto rounded-xl border border-white/[0.06]">
                 <div
-                  ref={playheadRef}
-                  className="absolute inset-y-0 w-px bg-white/70 pointer-events-none"
-                  style={{ left: '0%' }}
-                />
+                  className="relative bg-black cursor-pointer"
+                  style={{ minWidth: '600px' }}
+                  onClick={handleRollClick}
+                >
+                  <canvas
+                    ref={canvasRef}
+                    style={{ imageRendering: 'pixelated', display: 'block' }}
+                  />
+                  {/* 플레이헤드 */}
+                  <div
+                    ref={playheadRef}
+                    className="absolute inset-y-0 w-px bg-white/70 pointer-events-none"
+                    style={{ left: '0%' }}
+                  />
+                </div>
               </div>
             </div>
 
