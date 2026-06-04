@@ -3,13 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { fileStore } from '@/app/lib/fileStore'
-
-interface UploadedFile {
-  id: string
-  file: File
-  status: 'idle' | 'uploading' | 'done'
-  progress: number
-}
+import { filesStore, UploadedFile } from '@/app/lib/filesStore'
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -219,10 +213,13 @@ export default function DropZone() {
     router.push('/notes')
   }
 
-  const [files, setFiles]       = useState<UploadedFile[]>([])
+  const [files, setFiles]       = useState<UploadedFile[]>(() => filesStore.get())
   const [isDragging, setIsDragging] = useState(false)
   const [dragError, setDragError]   = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // files가 바뀔 때마다 store에 동기화
+  useEffect(() => { filesStore.set(files) }, [files])
 
   // 녹음
   const [recording, setRecording]   = useState(false)
