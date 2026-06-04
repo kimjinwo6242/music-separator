@@ -271,18 +271,18 @@ export default function NotesPage() {
             {/* 감지된 음 목록 */}
             {done && topNotes.length > 0 && (
               <div>
-                <p className="text-xs text-white/30 mb-3">감지된 음 (빈도순)</p>
-                <div className="flex flex-wrap gap-2">
+                <p className="text-xs text-white/30 mb-3">감지된 음 (빈도순) · {topNotes.length}개</p>
+                <div className="grid grid-cols-5 gap-2 max-h-72 overflow-y-auto pr-1">
                   {topNotes.map(({ note, count }) => {
                     const color = NOTE_COLORS[noteClass(note)] ?? '#a29bfe'
                     return (
                       <div
                         key={note}
-                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-white/[0.06] bg-white/[0.03]"
+                        className="flex flex-col items-center gap-2 py-3 px-2 rounded-xl border border-white/[0.06] bg-white/[0.03]"
                       >
-                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
-                        <span className="text-sm font-mono font-medium text-white/80">{note}</span>
-                        <span className="text-xs text-white/25">{count}</span>
+                        <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                        <span className="text-base font-mono font-bold text-white/85 tracking-tight">{note}</span>
+                        <span className="text-xs text-white/25 tabular-nums">{count}</span>
                       </div>
                     )
                   })}
