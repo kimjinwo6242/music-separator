@@ -72,9 +72,10 @@ export default function NotesPage() {
   const [audioDur, setAudioDur] = useState(0)
 
   // DOM ref로 직접 업데이트 (re-render 없이 60fps)
-  const playheadRef    = useRef<HTMLDivElement>(null)
-  const seekFillRef    = useRef<HTMLDivElement>(null)
-  const timeRef        = useRef<HTMLSpanElement>(null)
+  const playheadRef       = useRef<HTMLDivElement>(null)
+  const seekFillRef       = useRef<HTMLDivElement>(null)
+  const timeRef           = useRef<HTMLSpanElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
 
   // 분석
   useEffect(() => {
@@ -119,8 +120,25 @@ export default function NotesPage() {
   }, [done])
 
   const updateHead = (pct: number) => {
-    if (playheadRef.current)  playheadRef.current.style.left  = `${pct * 100}%`
-    if (seekFillRef.current)  seekFillRef.current.style.width  = `${pct * 100}%`
+    const canvas = canvasRef.current
+    const canvasW = canvas ? canvas.width : 0
+
+    // 픽셀 기반 포지셔닝 — left:% 는 CSS 너비(뷰포트 크기) 기준이라 틀림
+    if (playheadRef.current && canvasW > 0) {
+      playheadRef.current.style.left = `${pct * canvasW}px`
+    }
+
+    // 재생 중 자동 스크롤 — 플레이헤드가 보이는 영역 밖으로 나가면 따라감
+    const container = scrollContainerRef.current
+    if (container && canvasW > 0) {
+      const px = pct * canvasW
+      const visibleRight = container.scrollLeft + container.clientWidth
+      if (px > visibleRight - 20) {
+        container.scrollLeft = px - container.clientWidth * 0.15
+      }
+    }
+
+    if (seekFillRef.current)  seekFillRef.current.style.width = `${pct * 100}%`
     if (timeRef.current) {
       const audio = audioRef.current
       timeRef.current.textContent = audio ? fmt(audio.currentTime) : '0:00'
@@ -157,8 +175,12 @@ export default function NotesPage() {
 
   const handleRollClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!done) return
-    const rect = e.currentTarget.getBoundingClientRect()
-    seekTo((e.clientX - rect.left) / rect.width)
+    const canvas = canvasRef.current
+    const container = scrollContainerRef.current
+    if (!canvas || !container) return
+    const rect = container.getBoundingClientRect()
+    const clickX = e.clientX - rect.left + container.scrollLeft
+    seekTo(clickX / canvas.width)
   }
 
   const handleSeekBarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -191,21 +213,23 @@ export default function NotesPage() {
             <div>
               <p className="text-xs text-white/30 mb-2">피아노 롤 · C2 ~ C6</p>
               {/* 가로 스크롤 wrapper */}
-              <div className="overflow-x-auto rounded-xl border border-white/[0.06]">
+              <div
+                ref={scrollContainerRef}
+                className="overflow-x-auto rounded-xl border border-white/[0.06]"
+              >
                 <div
                   className="relative bg-black cursor-pointer"
-                  style={{ minWidth: '600px' }}
                   onClick={handleRollClick}
                 >
                   <canvas
                     ref={canvasRef}
-                    style={{ imageRendering: 'pixelated', display: 'block' }}
+                    style={{ imageRendering: 'pixelated', display: 'block', minWidth: '600px' }}
                   />
-                  {/* 플레이헤드 */}
+                  {/* 플레이헤드 — px 기반이므로 left:0px 시작 */}
                   <div
                     ref={playheadRef}
                     className="absolute inset-y-0 w-px bg-white/70 pointer-events-none"
-                    style={{ left: '0%' }}
+                    style={{ left: '0px' }}
                   />
                 </div>
               </div>
