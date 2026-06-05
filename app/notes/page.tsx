@@ -396,18 +396,84 @@ export default function NotesPage() {
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-white flex flex-col">
-      <div className="flex items-center gap-4 px-6 py-4 border-b border-white/[0.06]">
-        <button
-          onClick={() => router.back()}
-          className="flex items-center gap-1.5 text-sm text-white/40 hover:text-white/70 transition-colors"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-          </svg>
-          돌아가기
-        </button>
-        <span className="text-sm text-white/25">|</span>
-        <span className="text-sm text-white/50 truncate max-w-sm">{fileName}</span>
+      <div className="relative flex items-center px-6 py-3 border-b border-white/[0.06] shrink-0">
+        {/* 왼쪽: 뒤로가기 + 파일명 */}
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={() => router.back()}
+            className="flex items-center gap-1.5 text-sm text-white/40 hover:text-white/70 transition-colors shrink-0"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+            </svg>
+            돌아가기
+          </button>
+          <span className="text-sm text-white/25 shrink-0">|</span>
+          <span className="text-sm text-white/50 truncate">{fileName}</span>
+        </div>
+
+        {/* 가운데: 재생 컨트롤 */}
+        {done && (
+          <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-3">
+            <button
+              onClick={togglePlay}
+              disabled={audioDur === 0}
+              className="w-8 h-8 rounded-full bg-white/8 hover:bg-white/15 flex items-center justify-center transition-colors shrink-0 disabled:opacity-30"
+            >
+              {playing ? (
+                <svg className="w-3.5 h-3.5 text-white/70" fill="currentColor" viewBox="0 0 24 24">
+                  <rect x="6"  y="4" width="4" height="16" rx="1" />
+                  <rect x="14" y="4" width="4" height="16" rx="1" />
+                </svg>
+              ) : (
+                <svg className="w-3.5 h-3.5 text-white/70 translate-x-px" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              )}
+            </button>
+
+            <span className="text-xs text-white/35 tabular-nums">
+              <span ref={timeRef}>0:00</span>
+              <span className="text-white/15 mx-1">/</span>
+              {fmt(audioDur)}
+            </span>
+
+            <button onClick={toggleMute} className="shrink-0 text-white/30 hover:text-white/60 transition-colors">
+              {muted || volume === 0 ? (
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                </svg>
+              ) : volume < 0.5 ? (
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072" />
+                </svg>
+              ) : (
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15zM17.657 6.343a8 8 0 010 11.314M15.536 8.464a5 5 0 010 7.072" />
+                </svg>
+              )}
+            </button>
+
+            <div className="relative w-20 h-1">
+              <div className="absolute inset-0 rounded-full bg-white/10" />
+              <div
+                className="absolute inset-y-0 left-0 rounded-full bg-white/30"
+                style={{ width: `${(muted ? 0 : volume) * 100}%` }}
+              />
+              <input
+                type="range" min={0} max={1} step={0.01}
+                value={muted ? 0 : volume}
+                onChange={changeVolume}
+                className="absolute inset-0 w-full opacity-0 cursor-pointer h-full"
+              />
+            </div>
+            <span className="text-xs text-white/25 tabular-nums w-8">
+              {Math.round((muted ? 0 : volume) * 100)}%
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="flex-1 flex flex-col gap-6 p-6 w-full">
@@ -560,71 +626,6 @@ export default function NotesPage() {
                 </p>
               )}
             </div>
-
-            {/* 재생 컨트롤 */}
-            {done && (
-              <div className="flex items-center gap-4">
-                <button
-                  onClick={togglePlay}
-                  disabled={audioDur === 0}
-                  className="w-9 h-9 rounded-full bg-white/8 hover:bg-white/15 flex items-center justify-center transition-colors shrink-0 disabled:opacity-30"
-                >
-                  {playing ? (
-                    <svg className="w-3.5 h-3.5 text-white/70" fill="currentColor" viewBox="0 0 24 24">
-                      <rect x="6"  y="4" width="4" height="16" rx="1" />
-                      <rect x="14" y="4" width="4" height="16" rx="1" />
-                    </svg>
-                  ) : (
-                    <svg className="w-3.5 h-3.5 text-white/70 translate-x-px" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M8 5v14l11-7z" />
-                    </svg>
-                  )}
-                </button>
-
-                <span className="text-xs text-white/35 tabular-nums">
-                  <span ref={timeRef}>0:00</span>
-                  <span className="text-white/15 mx-1">/</span>
-                  {fmt(audioDur)}
-                </span>
-
-                <div className="flex-1" />
-
-                <button onClick={toggleMute} className="shrink-0 text-white/30 hover:text-white/60 transition-colors">
-                  {muted || volume === 0 ? (
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
-                    </svg>
-                  ) : volume < 0.5 ? (
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072" />
-                    </svg>
-                  ) : (
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15zM17.657 6.343a8 8 0 010 11.314M15.536 8.464a5 5 0 010 7.072" />
-                    </svg>
-                  )}
-                </button>
-
-                <div className="relative w-20 h-1">
-                  <div className="absolute inset-0 rounded-full bg-white/10" />
-                  <div
-                    className="absolute inset-y-0 left-0 rounded-full bg-white/30"
-                    style={{ width: `${(muted ? 0 : volume) * 100}%` }}
-                  />
-                  <input
-                    type="range" min={0} max={1} step={0.01}
-                    value={muted ? 0 : volume}
-                    onChange={changeVolume}
-                    className="absolute inset-0 w-full opacity-0 cursor-pointer h-full"
-                  />
-                </div>
-                <span className="text-xs text-white/25 tabular-nums w-8">
-                  {Math.round((muted ? 0 : volume) * 100)}%
-                </span>
-              </div>
-            )}
 
             {!done && (
               <div className="space-y-2">
