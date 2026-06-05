@@ -375,6 +375,23 @@ export default function NotesPage() {
     }
   }
 
+  // 줌 퍼센트 직접 입력
+  const [zoomInput, setZoomInput]   = useState('')
+  const [editingZoom, setEditingZoom] = useState(false)
+  const zoomInputRef = useRef<HTMLInputElement>(null)
+
+  const startZoomEdit = () => {
+    setZoomInput(String(Math.round(zoomX * 100)))
+    setEditingZoom(true)
+    setTimeout(() => { zoomInputRef.current?.select() }, 0)
+  }
+
+  const commitZoomEdit = () => {
+    const val = parseInt(zoomInput, 10)
+    if (!isNaN(val) && val > 0) updateZoom(val / 100)
+    setEditingZoom(false)
+  }
+
   const showXAxis = done && audioDur > 0
 
   return (
@@ -409,9 +426,34 @@ export default function NotesPage() {
                       disabled={zoomX <= 0.25}
                       className="w-6 h-6 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white/80 text-sm transition-colors disabled:opacity-30"
                     >−</button>
-                    <span className="text-[11px] font-mono text-white/35 w-12 text-center tabular-nums select-none">
-                      {Math.round(zoomX * 100)}%
-                    </span>
+
+                    {editingZoom ? (
+                      <div className="relative w-14 flex items-center">
+                        <input
+                          ref={zoomInputRef}
+                          type="text"
+                          inputMode="numeric"
+                          value={zoomInput}
+                          onChange={e => setZoomInput(e.target.value.replace(/[^0-9]/g, ''))}
+                          onBlur={commitZoomEdit}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') commitZoomEdit()
+                            if (e.key === 'Escape') setEditingZoom(false)
+                          }}
+                          className="w-10 bg-white/10 border border-white/20 rounded text-[11px] font-mono text-white/80 text-center tabular-nums outline-none px-1 py-0.5"
+                        />
+                        <span className="text-[11px] text-white/35 ml-0.5">%</span>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={startZoomEdit}
+                        title="클릭해서 직접 입력"
+                        className="w-14 text-[11px] font-mono text-white/35 hover:text-white/70 text-center tabular-nums hover:bg-white/5 rounded py-0.5 transition-colors"
+                      >
+                        {Math.round(zoomX * 100)}%
+                      </button>
+                    )}
+
                     <button
                       onClick={() => updateZoom(zoomX * 1.5)}
                       disabled={zoomX >= 8}
