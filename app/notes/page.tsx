@@ -317,7 +317,7 @@ export default function NotesPage() {
                     className={`relative bg-white select-none ${
                       dragging ? 'cursor-grabbing' : audioDur > 0 ? 'cursor-grab' : ''
                     }`}
-                    style={{ minWidth: 600 }}
+                    style={{ width: canvasWidth || 600, minWidth: 600 }}
                     onMouseDown={handleRollMouseDown}
                   >
                     <canvas
@@ -344,7 +344,7 @@ export default function NotesPage() {
                   {showXAxis && (
                     <div
                       className="relative bg-[#f5f5f5] border-t border-black/10"
-                      style={{ height: X_AXIS_H, minWidth: 600 }}
+                      style={{ height: X_AXIS_H, width: canvasWidth || 600 }}
                     >
                       {xLabels.map(({ t, x }) => (
                         <span
