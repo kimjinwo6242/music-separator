@@ -431,7 +431,7 @@ export default function NotesPage() {
                     {yLabels.map(({ label, y }) => (
                       <span
                         key={label}
-                        className="absolute right-1.5 text-[10px] font-mono text-black/65 select-none leading-none"
+                        className="absolute right-1.5 text-[10px] font-mono font-bold text-red-600 select-none leading-none"
                         style={{ top: y, transform: 'translateY(-50%)' }}
                       >
                         {label}
@@ -501,7 +501,7 @@ export default function NotesPage() {
                       {xLabels.map(({ t, x }) => (
                         <span
                           key={t}
-                          className="absolute text-[9px] font-mono text-black/65 select-none"
+                          className="absolute text-[9px] font-mono font-bold text-red-600 select-none"
                           style={{ left: x, top: '50%', transform: 'translate(-50%, -50%)' }}
                         >
                           {fmt(t)}
