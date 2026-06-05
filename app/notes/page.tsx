@@ -10,13 +10,11 @@ const X_AXIS_H = 20
 const Y_AXIS_W = 40
 const PAD      = 3  // 최저/최고음 위아래 여백 (semitone)
 
-function getTimeInterval(dur: number): number {
-  if (dur <= 15)  return 2
-  if (dur <= 30)  return 5
-  if (dur <= 90)  return 10
-  if (dur <= 180) return 30
-  if (dur <= 600) return 60
-  return 120
+// 화면에 보이는 시간 구간을 기준으로 ~6개 레이블이 보이도록 "nice" 간격 선택
+function getTimeInterval(visibleDur: number): number {
+  const raw = visibleDur / 6
+  const nice = [0.5, 1, 2, 5, 10, 15, 20, 30, 60, 120, 300, 600]
+  return nice.find(n => n >= raw) ?? 600
 }
 
 function detectMidiRange(frames: NoteFrame[]): [number, number] {
@@ -89,6 +87,20 @@ export default function NotesPage() {
   const timeRef            = useRef<HTMLSpanElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
 
+  // 스크롤 컨테이너의 실제 표시 너비 (ResizeObserver로 추적)
+  const [containerWidth, setContainerWidth] = useState(0)
+
+  useEffect(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    const ro = new ResizeObserver(entries => {
+      setContainerWidth(entries[0].contentRect.width)
+    })
+    ro.observe(el)
+    setContainerWidth(el.clientWidth)
+    return () => ro.disconnect()
+  }, [])
+
   // ── 줌 ──────────────────────────────────────────
   const [zoomX, setZoomX]       = useState(1)
   const zoomXRef                = useRef(1)
@@ -124,14 +136,16 @@ export default function NotesPage() {
 
   const xLabels = useMemo(() => {
     if (!done || audioDur <= 0 || canvasWidth <= 0) return []
-    const dw       = canvasWidth * zoomX
-    const interval = getTimeInterval(audioDur)
+    const dw = canvasWidth * zoomX
+    // 현재 화면에 보이는 시간 구간 → 그에 맞는 눈금 간격 계산
+    const visibleDur = containerWidth > 0 ? (containerWidth / dw) * audioDur : audioDur
+    const interval   = getTimeInterval(visibleDur)
     const labels: { t: number; x: number }[] = []
     for (let t = 0; t <= audioDur; t += interval) {
       labels.push({ t, x: (t / audioDur) * dw })
     }
     return labels
-  }, [done, audioDur, canvasWidth, zoomX])
+  }, [done, audioDur, canvasWidth, zoomX, containerWidth])
 
   useEffect(() => {
     const file = fileStore.get()
