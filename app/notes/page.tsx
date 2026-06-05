@@ -438,6 +438,7 @@ export default function NotesPage() {
   }
 
   const showXAxis = done && audioDur > 0
+  const [showNoteLines, setShowNoteLines] = useState(false)
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-white flex flex-col">
@@ -578,7 +579,24 @@ export default function NotesPage() {
         ) : (
           <>
             <div>
-              <p className="text-xs text-white/30 mb-2">피아노 롤 · C2 ~ C6</p>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-white/30">피아노 롤 · C2 ~ C6</p>
+                <button
+                  onClick={() => setShowNoteLines(v => !v)}
+                  className={`flex items-center gap-1.5 text-[11px] font-mono px-2 py-0.5 rounded transition-colors ${
+                    showNoteLines
+                      ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                      : 'bg-white/5 text-white/30 hover:bg-white/10 hover:text-white/50'
+                  }`}
+                >
+                  <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none">
+                    <line x1="0" y1="3" x2="12" y2="3" stroke="currentColor" strokeWidth="1.5" strokeDasharray="2 1.5"/>
+                    <line x1="0" y1="6" x2="12" y2="6" stroke="currentColor" strokeWidth="1.5" strokeDasharray="2 1.5"/>
+                    <line x1="0" y1="9" x2="12" y2="9" stroke="currentColor" strokeWidth="1.5" strokeDasharray="2 1.5"/>
+                  </svg>
+                  음계선
+                </button>
+              </div>
 
               <div className="flex overflow-hidden rounded-xl border border-black/10">
                 {/* Y축 — 고정 */}
@@ -653,6 +671,20 @@ export default function NotesPage() {
                         key={t}
                         className="absolute inset-y-0 pointer-events-none"
                         style={{ left: x, borderLeft: '1px dashed rgba(0,0,0,0.18)' }}
+                      />
+                    ))}
+                    {/* 음계 가로 점선 */}
+                    {showNoteLines && yLabels.map(({ label, y, isC }) => (
+                      <div
+                        key={`line-${label}`}
+                        className="absolute inset-x-0 pointer-events-none"
+                        style={{
+                          top: y,
+                          height: 0,
+                          borderTop: isC
+                            ? '1px dashed rgba(239,68,68,0.65)'
+                            : '1px dashed rgba(239,68,68,0.28)',
+                        }}
                       />
                     ))}
                   </div>
