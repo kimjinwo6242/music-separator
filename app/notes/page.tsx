@@ -5,15 +5,6 @@ import { useRouter } from 'next/navigation'
 import { fileStore } from '@/app/lib/fileStore'
 import { analyzePitch, NoteFrame } from '@/app/lib/pitchDetection'
 
-const NOTE_COLORS: Record<string, string> = {
-  'C':  '#ff6b6b', 'C#': '#ff9f43', 'D':  '#feca57', 'D#': '#48dbfb',
-  'E':  '#1dd1a1', 'F':  '#ff9ff3', 'F#': '#54a0ff', 'G':  '#a29bfe',
-  'G#': '#00cec9', 'A':  '#fd79a8', 'A#': '#e17055', 'B':  '#74b9ff',
-}
-
-function noteClass(note: string): string {
-  return note.replace(/\d/, '')
-}
 
 const MIDI_MIN  = 36
 const MIDI_MAX  = 84
@@ -51,23 +42,23 @@ function drawPianoRoll(canvas: HTMLCanvasElement, frames: NoteFrame[]) {
   canvas.height = H
 
   const ctx = canvas.getContext('2d')!
-  ctx.fillStyle = '#0d0d0f'
+  ctx.fillStyle = '#ffffff'
   ctx.fillRect(0, 0, W, H)
 
-  ctx.strokeStyle = 'rgba(255,255,255,0.07)'
+  ctx.strokeStyle = 'rgba(0,0,0,0.08)'
   ctx.lineWidth = 1
   for (let midi = MIDI_MIN; midi <= MIDI_MAX; midi += 12) {
     const y = H - (midi - MIDI_MIN) * ROW_H
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke()
   }
 
+  ctx.fillStyle = '#1a1a1a'
   for (let col = 0; col < W; col++) {
     const frame = frames[Math.floor(col * step)]
     if (!frame.midi || !frame.note) continue
     const midi = frame.midi
     if (midi < MIDI_MIN || midi > MIDI_MAX) continue
     const y = H - (midi - MIDI_MIN + 1) * ROW_H
-    ctx.fillStyle = NOTE_COLORS[noteClass(frame.note)] ?? '#a29bfe'
     ctx.fillRect(col, y, 1, ROW_H)
   }
 }
@@ -253,17 +244,17 @@ export default function NotesPage() {
             <div>
               <p className="text-xs text-white/30 mb-2">피아노 롤 · C2 ~ C6</p>
 
-              <div className="flex overflow-hidden rounded-xl border border-white/[0.06]">
+              <div className="flex overflow-hidden rounded-xl border border-black/10">
                 {/* Y축 — 고정 (가로 스크롤 안함) */}
                 <div
-                  className="shrink-0 flex flex-col bg-[#080809] border-r border-white/[0.06]"
+                  className="shrink-0 flex flex-col bg-[#f5f5f5] border-r border-black/10"
                   style={{ width: Y_AXIS_W }}
                 >
                   <div className="relative overflow-hidden" style={{ height: CANVAS_H }}>
                     {Y_LABELS.map(({ label, y }) => (
                       <span
                         key={label}
-                        className="absolute right-1.5 text-[10px] font-mono text-white/35 select-none leading-none"
+                        className="absolute right-1.5 text-[10px] font-mono text-black/40 select-none leading-none"
                         style={{ top: y, transform: 'translateY(-50%)' }}
                       >
                         {label}
@@ -273,7 +264,7 @@ export default function NotesPage() {
                   {/* X축 높이 맞춤 */}
                   {showXAxis && (
                     <div
-                      className="border-t border-white/[0.06]"
+                      className="border-t border-black/10"
                       style={{ height: X_AXIS_H }}
                     />
                   )}
@@ -283,7 +274,7 @@ export default function NotesPage() {
                 <div ref={scrollContainerRef} className="flex-1 overflow-x-auto">
                   {/* 캔버스 + 플레이헤드 + 세로 그리드 라인 */}
                   <div
-                    className="relative bg-black cursor-pointer"
+                    className="relative bg-white cursor-pointer"
                     style={{ minWidth: 600 }}
                     onClick={handleRollClick}
                   >
@@ -293,14 +284,14 @@ export default function NotesPage() {
                     />
                     <div
                       ref={playheadRef}
-                      className="absolute inset-y-0 w-px bg-white/70 pointer-events-none"
+                      className="absolute inset-y-0 w-px bg-violet-500/80 pointer-events-none"
                       style={{ left: '0px' }}
                     />
                     {/* 세로 그리드 — X축 눈금 위치 */}
                     {xLabels.filter(({ t }) => t > 0).map(({ t, x }) => (
                       <div
                         key={t}
-                        className="absolute inset-y-0 w-px bg-white/[0.07] pointer-events-none"
+                        className="absolute inset-y-0 w-px bg-black/[0.07] pointer-events-none"
                         style={{ left: x }}
                       />
                     ))}
@@ -309,13 +300,13 @@ export default function NotesPage() {
                   {/* X축 — 시간 레이블 */}
                   {showXAxis && (
                     <div
-                      className="relative bg-[#080809] border-t border-white/[0.06]"
+                      className="relative bg-[#f5f5f5] border-t border-black/10"
                       style={{ height: X_AXIS_H, minWidth: 600 }}
                     >
                       {xLabels.map(({ t, x }) => (
                         <span
                           key={t}
-                          className="absolute text-[9px] font-mono text-white/35 select-none"
+                          className="absolute text-[9px] font-mono text-black/40 select-none"
                           style={{
                             left: x,
                             top: '50%',
