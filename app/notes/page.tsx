@@ -182,13 +182,17 @@ export default function NotesPage() {
         if (!container || !canvas) return
 
         const delta      = e.clientX - phDragStartXRef.current
-        const newAnchor  = Math.max(0, Math.min(container.clientWidth, phDragStartAnchorRef.current + delta))
-        anchorXRef.current = newAnchor
+        // 화면 내 새 위치 (0 ~ 컨테이너 너비 클램프)
+        const newScreenX = Math.max(0, Math.min(container.clientWidth, phDragStartAnchorRef.current + delta))
+        anchorXRef.current = newScreenX
 
-        // 오디오 위치는 그대로, 스크롤만 바꿔 플레이헤드가 새 anchor에 오도록
+        // 캔버스 절대 좌표 = scrollLeft + 화면 내 위치 (스크롤은 변경 없음)
+        const canvasPx = container.scrollLeft + newScreenX
+        if (playheadRef.current) playheadRef.current.style.left = `${canvasPx}px`
+
         if (audio && audio.duration) {
-          const currentPx = (audio.currentTime / audio.duration) * canvas.width
-          container.scrollLeft = Math.max(0, currentPx - newAnchor)
+          audio.currentTime = Math.min(1, canvasPx / canvas.width) * audio.duration
+          if (timeRef.current) timeRef.current.textContent = fmt(audio.currentTime)
         }
         return
       }
@@ -240,16 +244,20 @@ export default function NotesPage() {
     }
   }, [tick])
 
-  // 플레이헤드 라인을 직접 드래그해 화면 내 고정 위치 변경
+  // 플레이헤드 라인을 직접 드래그해 화면 내 위치 변경
   const handlePlayheadMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation()
     e.preventDefault()
     const container = scrollContainerRef.current
     if (!container) return
 
+    // 현재 플레이헤드의 실제 화면 위치 = canvas left - scrollLeft
+    const canvasPx   = parseFloat(playheadRef.current?.style.left ?? '0') || 0
+    const screenX    = canvasPx - container.scrollLeft
+
     isPlayheadDragRef.current    = true
     phDragStartXRef.current      = e.clientX
-    phDragStartAnchorRef.current = anchorXRef.current ?? container.clientWidth / 5
+    phDragStartAnchorRef.current = screenX
     setDragging(true)
   }
 
