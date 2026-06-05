@@ -82,7 +82,7 @@ export default function NotesPage() {
   // 분석
   useEffect(() => {
     const file = fileStore.get()
-    if (!file) { router.replace('/'); return }
+    if (!file) { router.replace('/upload'); return }
     setFileName(file.name)
     fileRef.current = file
 

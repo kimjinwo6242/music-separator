@@ -16,7 +16,7 @@ export default function SpectrogramPage() {
   useEffect(() => {
     const file = fileStore.get()
     if (!file) {
-      router.replace('/')
+      router.replace('/upload')
       return
     }
     setFileName(file.name)
