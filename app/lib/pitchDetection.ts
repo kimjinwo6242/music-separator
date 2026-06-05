@@ -84,6 +84,45 @@ function detectPitch(mags: Float32Array, sr: number): number | null {
   return bestBin * freqPerBin
 }
 
+// 옥타브 오류 보정: 주변 프레임의 중앙값과 ±12 차이 나는 값을 수정
+function fixOctaveErrors(frames: NoteFrame[]): NoteFrame[] {
+  const midis = frames.map(f => f.midi)
+  const N     = midis.length
+  const WIN   = 8   // 중앙값 계산 윈도우 (±8 프레임)
+
+  const corrected = midis.map((midi, i) => {
+    if (midi === null) return null
+
+    // 현재 프레임 제외하고 주변 중앙값 계산
+    const nbrs: number[] = []
+    for (let j = Math.max(0, i - WIN); j <= Math.min(N - 1, i + WIN); j++) {
+      if (j !== i && midis[j] !== null) nbrs.push(midis[j]!)
+    }
+    if (nbrs.length < 3) return midi
+
+    nbrs.sort((a, b) => a - b)
+    const median = nbrs[Math.floor(nbrs.length / 2)]
+    const diff   = midi - median
+
+    // ±12 반음(1 옥타브) 오차 → 반대 방향으로 보정
+    if (diff > 10)  return midi - 12
+    if (diff < -10) return midi + 12
+    return midi
+  })
+
+  return frames.map((frame, i) => {
+    const newMidi = corrected[i]
+    if (newMidi === frame.midi) return frame
+    return {
+      ...frame,
+      midi: newMidi,
+      note: newMidi !== null && newMidi >= 24 && newMidi <= 96
+        ? midiToNote(newMidi)
+        : null,
+    }
+  })
+}
+
 export async function analyzePitch(
   file: File,
   onProgress: (pct: number) => void,
@@ -135,5 +174,5 @@ export async function analyzePitch(
   }
 
   onProgress(1)
-  return frames
+  return fixOctaveErrors(frames)
 }
