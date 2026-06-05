@@ -79,6 +79,9 @@ export default function NotesPage() {
   const [midiMin, setMidiMin]         = useState(36)
   const [midiMax, setMidiMax]         = useState(84)
 
+  const framesRef = useRef<NoteFrame[]>([])
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; note: string } | null>(null)
+
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const rafRef   = useRef<number>(0)
   const fileRef  = useRef<File | null>(null)
@@ -164,6 +167,7 @@ export default function NotesPage() {
     fileRef.current = file
 
     analyzePitch(file, setProgress).then(frames => {
+      framesRef.current = frames
       const [lo, hi] = detectMidiRange(frames)
       setMidiMin(lo)
       setMidiMax(hi)
@@ -323,6 +327,37 @@ export default function NotesPage() {
     }
   }, [tick])
 
+  const handleRollMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const frames = framesRef.current
+    const canvas = canvasRef.current
+    if (!done || frames.length === 0 || !canvas) { setTooltip(null); return }
+
+    const rect   = e.currentTarget.getBoundingClientRect()
+    const mouseX = e.clientX - rect.left
+    const mouseY = e.clientY - rect.top
+
+    // 표시 너비 → 캔버스 픽셀 X
+    const dw      = canvas.width * zoomXRef.current
+    const canvasX = Math.floor(mouseX * (canvas.width / dw))
+
+    // 캔버스 X → 프레임 인덱스
+    const W        = canvas.width
+    const step     = frames.length / W
+    const frameIdx = Math.min(frames.length - 1, Math.floor(canvasX * step))
+
+    // 마우스 Y → MIDI 번호 (세로 줌 없음, 1:1)
+    const H           = canvasHeight
+    const midiRow     = Math.floor((H - mouseY) / ROW_H)
+    const hoveredMidi = midiMin + midiRow
+
+    const frame = frames[frameIdx]
+    if (frame && frame.midi === hoveredMidi && frame.note) {
+      setTooltip({ x: e.clientX, y: e.clientY, note: frame.note })
+    } else {
+      setTooltip(null)
+    }
+  }
+
   const handleRollMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!done || audioDur === 0) return
     e.preventDefault()
@@ -406,6 +441,15 @@ export default function NotesPage() {
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-white flex flex-col">
+      {/* 노트 호버 툴팁 */}
+      {tooltip && (
+        <div
+          className="fixed z-50 pointer-events-none px-2 py-1 rounded-md bg-gray-900/90 border border-white/10 text-white font-mono text-xs shadow-lg backdrop-blur-sm"
+          style={{ left: tooltip.x + 12, top: tooltip.y - 28 }}
+        >
+          {tooltip.note}
+        </div>
+      )}
       {/* 헤더 */}
       <div className="flex items-center gap-3 px-6 py-3 border-b border-white/[0.06] shrink-0">
         <button
@@ -571,6 +615,8 @@ export default function NotesPage() {
                     }`}
                     style={{ width: displayWidth || 600, minWidth: 600 }}
                     onMouseDown={handleRollMouseDown}
+                    onMouseMove={handleRollMouseMove}
+                    onMouseLeave={() => setTooltip(null)}
                   >
                     <canvas
                       ref={canvasRef}
