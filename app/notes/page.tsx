@@ -7,8 +7,12 @@ import { analyzePitch, NoteFrame } from '@/app/lib/pitchDetection'
 
 const ROW_H    = 5
 const X_AXIS_H = 20
-const Y_AXIS_W = 40
+const Y_AXIS_W = 48
 const PAD      = 3  // 최저/최고음 위아래 여백 (semitone)
+
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
+// 자연음 반음 인덱스 (C D E F G A B)
+const NATURAL = new Set([0, 2, 4, 5, 7, 9, 11])
 
 // 화면에 보이는 시간 구간을 기준으로 ~6개 레이블이 보이도록 "nice" 간격 선택
 function getTimeInterval(visibleDur: number): number {
@@ -123,10 +127,16 @@ export default function NotesPage() {
   const canvasHeight = (midiMax - midiMin) * ROW_H
   const yLabels = useMemo(() => {
     const H   = (midiMax - midiMin) * ROW_H
-    const arr: { label: string; y: number }[] = []
-    for (let midi = Math.ceil(midiMin / 12) * 12; midi <= midiMax; midi += 12) {
+    const arr: { label: string; y: number; isC: boolean }[] = []
+    for (let midi = midiMin; midi <= midiMax; midi++) {
+      const semi = midi % 12
+      if (!NATURAL.has(semi)) continue
+      const isC    = semi === 0
       const octave = Math.floor(midi / 12) - 1
-      arr.push({ label: `C${octave}`, y: H - (midi - midiMin) * ROW_H })
+      const label  = isC ? `C${octave}` : NOTE_NAMES[semi]
+      // 행의 세로 중앙 (행 상단 y에서 반행 내려간 위치)
+      const y = H - (midi - midiMin) * ROW_H - ROW_H / 2
+      arr.push({ label, y, isC })
     }
     return arr
   }, [midiMin, midiMax])
@@ -533,10 +543,14 @@ export default function NotesPage() {
                   style={{ width: Y_AXIS_W }}
                 >
                   <div className="relative overflow-hidden" style={{ height: canvasHeight }}>
-                    {yLabels.map(({ label, y }) => (
+                    {yLabels.map(({ label, y, isC }) => (
                       <span
-                        key={label}
-                        className="absolute right-1.5 text-[10px] font-mono font-bold text-red-600 select-none leading-none"
+                        key={`${label}-${y}`}
+                        className={`absolute right-1.5 font-mono select-none leading-none ${
+                          isC
+                            ? 'text-[10px] font-bold text-red-600'
+                            : 'text-[8px] font-medium text-red-400'
+                        }`}
                         style={{ top: y, transform: 'translateY(-50%)' }}
                       >
                         {label}
