@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { fileStore } from '@/app/lib/fileStore'
 import { analyzePitch, NoteFrame } from '@/app/lib/pitchDetection'
 
-const ROW_H    = 5
+const ROW_H    = 10
 const X_AXIS_H = 20
 const Y_AXIS_W = 48
 const PAD      = 3  // 최저/최고음 위아래 여백 (semitone)
@@ -549,7 +549,7 @@ export default function NotesPage() {
                         className={`absolute right-1.5 font-mono select-none leading-none ${
                           isC
                             ? 'text-[10px] font-bold text-red-600'
-                            : 'text-[8px] font-medium text-red-400'
+                            : 'text-[7px] font-medium text-red-400/70'
                         }`}
                         style={{ top: y, transform: 'translateY(-50%)' }}
                       >
