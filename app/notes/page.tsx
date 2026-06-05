@@ -435,10 +435,10 @@ export default function NotesPage() {
                           inputMode="numeric"
                           value={zoomInput}
                           onChange={e => setZoomInput(e.target.value.replace(/[^0-9]/g, ''))}
-                          onBlur={commitZoomEdit}
+                          onBlur={() => setEditingZoom(false)}
                           onKeyDown={e => {
                             if (e.key === 'Enter') commitZoomEdit()
-                            if (e.key === 'Escape') setEditingZoom(false)
+                            else if (e.key === 'Escape') setEditingZoom(false)
                           }}
                           className="w-10 bg-white/10 border border-white/20 rounded text-[11px] font-mono text-white/80 text-center tabular-nums outline-none px-1 py-0.5"
                         />
