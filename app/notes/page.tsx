@@ -363,7 +363,7 @@ export default function NotesPage() {
         <span className="text-sm text-white/50 truncate max-w-sm">{fileName}</span>
       </div>
 
-      <div className="flex-1 flex flex-col gap-6 p-6 max-w-5xl mx-auto w-full">
+      <div className="flex-1 flex flex-col gap-6 p-6 w-full">
         {error ? (
           <p className="text-red-400 text-sm">{error}</p>
         ) : (
