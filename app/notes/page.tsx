@@ -88,12 +88,18 @@ export default function NotesPage() {
   const timeRef            = useRef<HTMLSpanElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
 
-  // 드래그 상태 (ref: 이벤트 핸들러용 / state: 커서 렌더링용)
+  // 캔버스 드래그 (seek)
   const isDraggingRef      = useRef(false)
   const dragStartXRef      = useRef(0)
   const dragStartScrollRef = useRef(0)
   const wasPlayingRef      = useRef(false)
   const [dragging, setDragging] = useState(false)
+
+  // 플레이헤드 위치 드래그 (anchor 재조정)
+  const anchorXRef             = useRef<number | null>(null)  // null = 기본값(컨테이너 1/5)
+  const isPlayheadDragRef      = useRef(false)
+  const phDragStartXRef        = useRef(0)
+  const phDragStartAnchorRef   = useRef(0)
 
   const xLabels = useMemo(() => {
     if (!done || audioDur <= 0 || canvasWidth <= 0) return []
@@ -146,8 +152,9 @@ export default function NotesPage() {
       const currentPx = pct * canvasW
       if (playheadRef.current) playheadRef.current.style.left = `${currentPx}px`
       // 드래그 중에는 스크롤을 직접 제어하므로 건드리지 않음
-      if (!isDraggingRef.current) {
-        container.scrollLeft = Math.max(0, currentPx - container.clientWidth / 5)
+      if (!isDraggingRef.current && !isPlayheadDragRef.current) {
+        const anchor = anchorXRef.current ?? container.clientWidth / 5
+        container.scrollLeft = Math.max(0, currentPx - anchor)
       }
     }
 
@@ -167,6 +174,26 @@ export default function NotesPage() {
   // 마우스 드래그: document 레벨에서 감지해 요소 밖으로 나가도 동작
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
+      // ── 플레이헤드 위치 드래그 ──
+      if (isPlayheadDragRef.current) {
+        const container = scrollContainerRef.current
+        const canvas    = canvasRef.current
+        const audio     = audioRef.current
+        if (!container || !canvas) return
+
+        const delta      = e.clientX - phDragStartXRef.current
+        const newAnchor  = Math.max(0, Math.min(container.clientWidth, phDragStartAnchorRef.current + delta))
+        anchorXRef.current = newAnchor
+
+        // 오디오 위치는 그대로, 스크롤만 바꿔 플레이헤드가 새 anchor에 오도록
+        if (audio && audio.duration) {
+          const currentPx = (audio.currentTime / audio.duration) * canvas.width
+          container.scrollLeft = Math.max(0, currentPx - newAnchor)
+        }
+        return
+      }
+
+      // ── 캔버스 드래그 (seek) ──
       if (!isDraggingRef.current) return
       const container = scrollContainerRef.current
       const canvas    = canvasRef.current
@@ -178,8 +205,8 @@ export default function NotesPage() {
       const newScroll  = Math.max(0, Math.min(maxScroll, dragStartScrollRef.current - delta))
       container.scrollLeft = newScroll
 
-      const anchorX   = container.clientWidth / 5
-      const currentPx = Math.min(canvas.width, newScroll + anchorX)
+      const anchor    = anchorXRef.current ?? container.clientWidth / 5
+      const currentPx = Math.min(canvas.width, newScroll + anchor)
       const seekPct   = currentPx / canvas.width
 
       if (playheadRef.current) playheadRef.current.style.left = `${currentPx}px`
@@ -188,10 +215,16 @@ export default function NotesPage() {
     }
 
     const onUp = () => {
+      // 플레이헤드 드래그 종료
+      if (isPlayheadDragRef.current) {
+        isPlayheadDragRef.current = false
+        setDragging(false)
+        return
+      }
+      // 캔버스 드래그 종료
       if (!isDraggingRef.current) return
       isDraggingRef.current = false
       setDragging(false)
-      // 드래그 전에 재생 중이었으면 재개
       if (wasPlayingRef.current && audioRef.current) {
         audioRef.current.play()
         rafRef.current = requestAnimationFrame(tick)
@@ -206,6 +239,19 @@ export default function NotesPage() {
       document.removeEventListener('mouseup', onUp)
     }
   }, [tick])
+
+  // 플레이헤드 라인을 직접 드래그해 화면 내 고정 위치 변경
+  const handlePlayheadMouseDown = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    e.preventDefault()
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    isPlayheadDragRef.current    = true
+    phDragStartXRef.current      = e.clientX
+    phDragStartAnchorRef.current = anchorXRef.current ?? container.clientWidth / 5
+    setDragging(true)
+  }
 
   const handleRollMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!done || audioDur === 0) return
@@ -324,12 +370,29 @@ export default function NotesPage() {
                       ref={canvasRef}
                       style={{ imageRendering: 'pixelated', display: 'block', minWidth: '600px' }}
                     />
-                    {/* 플레이헤드 */}
+                    {/* 플레이헤드 — 라인을 드래그해 화면 내 위치 조절 */}
                     <div
                       ref={playheadRef}
-                      className="absolute inset-y-0 w-[2px] bg-violet-500 pointer-events-none"
-                      style={{ left: '0px', boxShadow: '0 0 6px rgba(139,92,246,0.5)' }}
-                    />
+                      className="absolute inset-y-0 pointer-events-none"
+                      style={{ left: '0px', width: 0, overflow: 'visible', zIndex: 10 }}
+                    >
+                      {/* 넓은 투명 클릭 영역 */}
+                      <div
+                        className="absolute inset-y-0 -translate-x-1/2 cursor-ew-resize"
+                        style={{ width: 16, pointerEvents: 'auto' }}
+                        onMouseDown={handlePlayheadMouseDown}
+                      />
+                      {/* 시각적 선 */}
+                      <div
+                        className="absolute inset-y-0 w-[2px] -translate-x-px bg-violet-500 pointer-events-none"
+                        style={{ boxShadow: '0 0 6px rgba(139,92,246,0.5)' }}
+                      />
+                      {/* 상단 마커 */}
+                      <div
+                        className="absolute top-0 w-2.5 h-2.5 bg-violet-500 -translate-x-1/2 pointer-events-none"
+                        style={{ clipPath: 'polygon(50% 100%, 0% 0%, 100% 0%)' }}
+                      />
+                    </div>
                     {/* 세로 그리드 */}
                     {xLabels.filter(({ t }) => t > 0).map(({ t, x }) => (
                       <div
