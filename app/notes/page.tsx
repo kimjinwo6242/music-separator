@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { fileStore } from '@/app/lib/fileStore'
 import { analyzePitch, NoteFrame } from '@/app/lib/pitchDetection'
@@ -8,7 +8,7 @@ import { analyzePitch, NoteFrame } from '@/app/lib/pitchDetection'
 const MIDI_MIN = 36
 const MIDI_MAX = 84
 const ROW_H    = 5
-const CANVAS_H = (MIDI_MAX - MIDI_MIN) * ROW_H  // 240px
+const CANVAS_H = (MIDI_MAX - MIDI_MIN) * ROW_H
 const X_AXIS_H = 20
 const Y_AXIS_W = 40
 
@@ -69,11 +69,11 @@ function fmt(s: number) {
 export default function NotesPage() {
   const router = useRouter()
 
-  const canvasRef  = useRef<HTMLCanvasElement>(null)
-  const [fileName, setFileName]     = useState('')
-  const [progress, setProgress]     = useState(0)
-  const [done, setDone]             = useState(false)
-  const [error, setError]           = useState('')
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [fileName, setFileName]       = useState('')
+  const [progress, setProgress]       = useState(0)
+  const [done, setDone]               = useState(false)
+  const [error, setError]             = useState('')
   const [canvasWidth, setCanvasWidth] = useState(0)
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -88,28 +88,37 @@ export default function NotesPage() {
   const timeRef            = useRef<HTMLSpanElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
 
-  // 캔버스 드래그 (seek)
+  // ── 줌 ──────────────────────────────────────────
+  const [zoomX, setZoomX]       = useState(1)
+  const zoomXRef                = useRef(1)
+  const pendingScrollRef        = useRef<number | null>(null)
+
+  // ── 캔버스 드래그 (seek) ─────────────────────────
   const isDraggingRef      = useRef(false)
   const dragStartXRef      = useRef(0)
   const dragStartScrollRef = useRef(0)
   const wasPlayingRef      = useRef(false)
   const [dragging, setDragging] = useState(false)
 
-  // 플레이헤드 위치 드래그 (anchor 재조정)
-  const anchorXRef             = useRef<number | null>(null)  // null = 기본값(컨테이너 1/5)
-  const isPlayheadDragRef      = useRef(false)
-  const phDragStartXRef        = useRef(0)
-  const phDragStartAnchorRef   = useRef(0)
+  // ── 플레이헤드 위치 드래그 ───────────────────────
+  const anchorXRef           = useRef<number | null>(null)
+  const isPlayheadDragRef    = useRef(false)
+  const phDragStartXRef      = useRef(0)
+  const phDragStartAnchorRef = useRef(0)
+
+  // 렌더링에 사용되는 표시 너비
+  const displayWidth = canvasWidth * zoomX
 
   const xLabels = useMemo(() => {
     if (!done || audioDur <= 0 || canvasWidth <= 0) return []
+    const dw       = canvasWidth * zoomX
     const interval = getTimeInterval(audioDur)
     const labels: { t: number; x: number }[] = []
     for (let t = 0; t <= audioDur; t += interval) {
-      labels.push({ t, x: (t / audioDur) * canvasWidth })
+      labels.push({ t, x: (t / audioDur) * dw })
     }
     return labels
-  }, [done, audioDur, canvasWidth])
+  }, [done, audioDur, canvasWidth, zoomX])
 
   useEffect(() => {
     const file = fileStore.get()
@@ -142,22 +151,57 @@ export default function NotesPage() {
     }
   }, [done])
 
-  // 플레이헤드·스크롤·시간 표시 업데이트
+  // 줌 후 스크롤 보정: paint 전에 scrollLeft 반영
+  useLayoutEffect(() => {
+    if (pendingScrollRef.current !== null && scrollContainerRef.current) {
+      scrollContainerRef.current.scrollLeft = Math.max(0, pendingScrollRef.current)
+      pendingScrollRef.current = null
+    }
+  })
+
+  // 줌 변경 — 마우스 위치(없으면 화면 중앙)를 기준으로 스크롤 보정
+  const updateZoom = useCallback((newZoom: number, mouseScreenX?: number) => {
+    const clamped   = Math.max(0.25, Math.min(8, newZoom))
+    const container = scrollContainerRef.current
+    const canvas    = canvasRef.current
+    if (container && canvas) {
+      const oldDW        = canvas.width * zoomXRef.current
+      const anchorScreen = mouseScreenX ?? container.clientWidth / 2
+      const ratio        = (container.scrollLeft + anchorScreen) / oldDW
+      pendingScrollRef.current = ratio * canvas.width * clamped - anchorScreen
+    }
+    zoomXRef.current = clamped
+    setZoomX(clamped)
+  }, [])
+
+  // Ctrl + 휠 → 줌
+  useEffect(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2
+      const rect   = el.getBoundingClientRect()
+      updateZoom(zoomXRef.current * factor, e.clientX - rect.left)
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [updateZoom])
+
   const updateHead = (pct: number) => {
     const canvas    = canvasRef.current
     const container = scrollContainerRef.current
-    const canvasW   = canvas ? canvas.width : 0
+    const dw        = canvas ? canvas.width * zoomXRef.current : 0
 
-    if (canvasW > 0 && container) {
-      const currentPx = pct * canvasW
+    if (dw > 0 && container) {
+      const currentPx = pct * dw
       if (playheadRef.current) playheadRef.current.style.left = `${currentPx}px`
-      // 드래그 중에는 스크롤을 직접 제어하므로 건드리지 않음
       if (!isDraggingRef.current && !isPlayheadDragRef.current) {
         const anchor = anchorXRef.current ?? container.clientWidth / 5
         container.scrollLeft = Math.max(0, currentPx - anchor)
       }
     }
-
     if (timeRef.current) {
       const audio = audioRef.current
       timeRef.current.textContent = audio ? fmt(audio.currentTime) : '0:00'
@@ -171,10 +215,10 @@ export default function NotesPage() {
     rafRef.current = requestAnimationFrame(tick)
   }, [])
 
-  // 마우스 드래그: document 레벨에서 감지해 요소 밖으로 나가도 동작
+  // 마우스 드래그 핸들러 (document 레벨)
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
-      // ── 플레이헤드 위치 드래그 ──
+      // 플레이헤드 위치 드래그
       if (isPlayheadDragRef.current) {
         const container = scrollContainerRef.current
         const canvas    = canvasRef.current
@@ -182,50 +226,45 @@ export default function NotesPage() {
         if (!container || !canvas) return
 
         const delta      = e.clientX - phDragStartXRef.current
-        // 화면 내 새 위치 (0 ~ 컨테이너 너비 클램프)
         const newScreenX = Math.max(0, Math.min(container.clientWidth, phDragStartAnchorRef.current + delta))
         anchorXRef.current = newScreenX
 
-        // 캔버스 절대 좌표 = scrollLeft + 화면 내 위치 (스크롤은 변경 없음)
+        const dw       = canvas.width * zoomXRef.current
         const canvasPx = container.scrollLeft + newScreenX
         if (playheadRef.current) playheadRef.current.style.left = `${canvasPx}px`
-
         if (audio && audio.duration) {
-          audio.currentTime = Math.min(1, canvasPx / canvas.width) * audio.duration
+          audio.currentTime = Math.min(1, canvasPx / dw) * audio.duration
           if (timeRef.current) timeRef.current.textContent = fmt(audio.currentTime)
         }
         return
       }
 
-      // ── 캔버스 드래그 (seek) ──
+      // 캔버스 드래그 (seek)
       if (!isDraggingRef.current) return
       const container = scrollContainerRef.current
       const canvas    = canvasRef.current
       const audio     = audioRef.current
       if (!container || !canvas || !audio || !audio.duration) return
 
-      const delta      = e.clientX - dragStartXRef.current
-      const maxScroll  = Math.max(0, canvas.width - container.clientWidth)
-      const newScroll  = Math.max(0, Math.min(maxScroll, dragStartScrollRef.current - delta))
+      const dw        = canvas.width * zoomXRef.current
+      const delta     = e.clientX - dragStartXRef.current
+      const maxScroll = Math.max(0, dw - container.clientWidth)
+      const newScroll = Math.max(0, Math.min(maxScroll, dragStartScrollRef.current - delta))
       container.scrollLeft = newScroll
 
       const anchor    = anchorXRef.current ?? container.clientWidth / 5
-      const currentPx = Math.min(canvas.width, newScroll + anchor)
-      const seekPct   = currentPx / canvas.width
-
+      const currentPx = Math.min(dw, newScroll + anchor)
       if (playheadRef.current) playheadRef.current.style.left = `${currentPx}px`
-      audio.currentTime = seekPct * audio.duration
+      audio.currentTime = (currentPx / dw) * audio.duration
       if (timeRef.current) timeRef.current.textContent = fmt(audio.currentTime)
     }
 
     const onUp = () => {
-      // 플레이헤드 드래그 종료
       if (isPlayheadDragRef.current) {
         isPlayheadDragRef.current = false
         setDragging(false)
         return
       }
-      // 캔버스 드래그 종료
       if (!isDraggingRef.current) return
       isDraggingRef.current = false
       setDragging(false)
@@ -244,38 +283,30 @@ export default function NotesPage() {
     }
   }, [tick])
 
-  // 플레이헤드 라인을 직접 드래그해 화면 내 위치 변경
-  const handlePlayheadMouseDown = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    e.preventDefault()
-    const container = scrollContainerRef.current
-    if (!container) return
-
-    // 현재 플레이헤드의 실제 화면 위치 = canvas left - scrollLeft
-    const canvasPx   = parseFloat(playheadRef.current?.style.left ?? '0') || 0
-    const screenX    = canvasPx - container.scrollLeft
-
-    isPlayheadDragRef.current    = true
-    phDragStartXRef.current      = e.clientX
-    phDragStartAnchorRef.current = screenX
-    setDragging(true)
-  }
-
   const handleRollMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!done || audioDur === 0) return
     e.preventDefault()
-
-    // 재생 중이면 일시정지 후 드래그 (mouseup 때 재개)
     wasPlayingRef.current = !!audioRef.current && !audioRef.current.paused
     if (wasPlayingRef.current) {
       audioRef.current!.pause()
       cancelAnimationFrame(rafRef.current)
       setPlaying(false)
     }
-
     isDraggingRef.current      = true
     dragStartXRef.current      = e.clientX
     dragStartScrollRef.current = scrollContainerRef.current?.scrollLeft ?? 0
+    setDragging(true)
+  }
+
+  const handlePlayheadMouseDown = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    e.preventDefault()
+    const container = scrollContainerRef.current
+    if (!container) return
+    const canvasPx = parseFloat(playheadRef.current?.style.left ?? '0') || 0
+    isPlayheadDragRef.current    = true
+    phDragStartXRef.current      = e.clientX
+    phDragStartAnchorRef.current = canvasPx - container.scrollLeft
     setDragging(true)
   }
 
@@ -318,7 +349,6 @@ export default function NotesPage() {
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-white flex flex-col">
-      {/* 헤더 */}
       <div className="flex items-center gap-4 px-6 py-4 border-b border-white/[0.06]">
         <button
           onClick={() => router.back()}
@@ -338,12 +368,31 @@ export default function NotesPage() {
           <p className="text-red-400 text-sm">{error}</p>
         ) : (
           <>
-            {/* 피아노 롤 */}
             <div>
-              <p className="text-xs text-white/30 mb-2">피아노 롤 · C2 ~ C6</p>
+              {/* 툴바 */}
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-white/30">피아노 롤 · C2 ~ C6</p>
+                {done && (
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => updateZoom(zoomX / 1.5)}
+                      disabled={zoomX <= 0.25}
+                      className="w-6 h-6 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white/80 text-sm transition-colors disabled:opacity-30"
+                    >−</button>
+                    <span className="text-[11px] font-mono text-white/35 w-12 text-center tabular-nums select-none">
+                      {Math.round(zoomX * 100)}%
+                    </span>
+                    <button
+                      onClick={() => updateZoom(zoomX * 1.5)}
+                      disabled={zoomX >= 8}
+                      className="w-6 h-6 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white/80 text-sm transition-colors disabled:opacity-30"
+                    >+</button>
+                  </div>
+                )}
+              </div>
 
               <div className="flex overflow-hidden rounded-xl border border-black/10">
-                {/* Y축 — 가로 스크롤에 고정 */}
+                {/* Y축 — 고정 */}
                 <div
                   className="shrink-0 flex flex-col bg-[#f5f5f5] border-r border-black/10"
                   style={{ width: Y_AXIS_W }}
@@ -366,36 +415,38 @@ export default function NotesPage() {
 
                 {/* 스크롤 영역 */}
                 <div ref={scrollContainerRef} className="flex-1 overflow-x-hidden">
-                  {/* 캔버스 — 드래그로 위치 조절 */}
+                  {/* 캔버스 */}
                   <div
                     className={`relative bg-white select-none ${
                       dragging ? 'cursor-grabbing' : audioDur > 0 ? 'cursor-grab' : ''
                     }`}
-                    style={{ width: canvasWidth || 600, minWidth: 600 }}
+                    style={{ width: displayWidth || 600, minWidth: 600 }}
                     onMouseDown={handleRollMouseDown}
                   >
                     <canvas
                       ref={canvasRef}
-                      style={{ imageRendering: 'pixelated', display: 'block', minWidth: '600px' }}
+                      style={{
+                        imageRendering: 'pixelated',
+                        display: 'block',
+                        width:  displayWidth || 600,
+                        height: CANVAS_H,
+                      }}
                     />
-                    {/* 플레이헤드 — 라인을 드래그해 화면 내 위치 조절 */}
+                    {/* 플레이헤드 */}
                     <div
                       ref={playheadRef}
                       className="absolute inset-y-0 pointer-events-none"
                       style={{ left: '0px', width: 0, overflow: 'visible', zIndex: 10 }}
                     >
-                      {/* 넓은 투명 클릭 영역 */}
                       <div
                         className="absolute inset-y-0 -translate-x-1/2 cursor-ew-resize"
                         style={{ width: 16, pointerEvents: 'auto' }}
                         onMouseDown={handlePlayheadMouseDown}
                       />
-                      {/* 시각적 선 */}
                       <div
                         className="absolute inset-y-0 w-[2px] -translate-x-px bg-violet-500 pointer-events-none"
                         style={{ boxShadow: '0 0 6px rgba(139,92,246,0.5)' }}
                       />
-                      {/* 상단 마커 */}
                       <div
                         className="absolute top-0 w-2.5 h-2.5 bg-violet-500 -translate-x-1/2 pointer-events-none"
                         style={{ clipPath: 'polygon(50% 100%, 0% 0%, 100% 0%)' }}
@@ -411,11 +462,11 @@ export default function NotesPage() {
                     ))}
                   </div>
 
-                  {/* X축 — 시간 레이블 */}
+                  {/* X축 */}
                   {showXAxis && (
                     <div
                       className="relative bg-[#f5f5f5] border-t border-black/10"
-                      style={{ height: X_AXIS_H, width: canvasWidth || 600 }}
+                      style={{ height: X_AXIS_H, width: displayWidth || 600 }}
                     >
                       {xLabels.map(({ t, x }) => (
                         <span
@@ -431,15 +482,14 @@ export default function NotesPage() {
                 </div>
               </div>
 
-              {/* 드래그 안내 */}
               {done && audioDur > 0 && (
                 <p className="mt-2 text-[10px] text-white/20 text-right">
-                  롤을 좌우로 드래그해 재생 위치를 조절하세요
+                  롤 드래그: 위치 이동 · 세로줄 드래그: 기준선 이동 · Ctrl+휠: 확대/축소
                 </p>
               )}
             </div>
 
-            {/* 재생 컨트롤 — 시크바 없이 심플하게 */}
+            {/* 재생 컨트롤 */}
             {done && (
               <div className="flex items-center gap-4">
                 <button
@@ -459,7 +509,6 @@ export default function NotesPage() {
                   )}
                 </button>
 
-                {/* 현재시간 / 전체시간 */}
                 <span className="text-xs text-white/35 tabular-nums">
                   <span ref={timeRef}>0:00</span>
                   <span className="text-white/15 mx-1">/</span>
@@ -468,7 +517,6 @@ export default function NotesPage() {
 
                 <div className="flex-1" />
 
-                {/* 볼륨 */}
                 <button onClick={toggleMute} className="shrink-0 text-white/30 hover:text-white/60 transition-colors">
                   {muted || volume === 0 ? (
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -506,7 +554,6 @@ export default function NotesPage() {
               </div>
             )}
 
-            {/* 분석 진행 상태 */}
             {!done && (
               <div className="space-y-2">
                 <div className="flex justify-between text-xs text-white/30">
