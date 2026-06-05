@@ -16,6 +16,24 @@ const NATURAL = new Set([0, 2, 4, 5, 7, 9, 11])
 // 흰건반 순서 인덱스 (0=C … 6=B) — 옥타브 내 균등 배치에 사용
 const WHITE_KEY_IDX: Readonly<Record<number, number>> = { 0:0, 2:1, 4:2, 5:3, 7:4, 9:5, 11:6 }
 const WHITE_KEY_H = (12 * ROW_H) / 7   // 흰건반 1개 높이 (px)
+// 검은건반이 위치하는 흰건반 경계 인덱스 (C#→1, D#→2, F#→4, G#→5, A#→6)
+const BLACK_BOUNDARY: Readonly<Record<number, number>> = { 1:1, 3:2, 6:4, 8:5, 10:6 }
+
+// MIDI 번호 → 캔버스 Y 범위 (흰건반 균등 좌표계)
+function noteYRange(midi: number, midiMin: number, midiMax: number): { top: number; height: number } {
+  const H            = (midiMax - midiMin) * ROW_H
+  const semi         = midi % 12
+  const rawOct       = Math.floor(midi / 12)
+  const lowestRawOct = Math.floor(midiMin / 12)
+  const octBaseY     = H - (rawOct - lowestRawOct) * 12 * ROW_H
+  if (NATURAL.has(semi)) {
+    const k = WHITE_KEY_IDX[semi]
+    return { top: octBaseY - (k + 1) * WHITE_KEY_H, height: WHITE_KEY_H }
+  }
+  const b = BLACK_BOUNDARY[semi]
+  const h = WHITE_KEY_H * 0.6
+  return { top: octBaseY - b * WHITE_KEY_H - h / 2, height: h }
+}
 
 // 화면에 보이는 시간 구간을 기준으로 ~6개 레이블이 보이도록 "nice" 간격 선택
 function getTimeInterval(visibleDur: number): number {
@@ -34,9 +52,10 @@ function detectMidiRange(frames: NoteFrame[]): [number, number] {
 }
 
 function drawPianoRoll(canvas: HTMLCanvasElement, frames: NoteFrame[], midiMin: number, midiMax: number) {
-  const H    = (midiMax - midiMin) * ROW_H
-  const W    = Math.min(frames.length, 3000)
-  const step = frames.length / W
+  const H            = (midiMax - midiMin) * ROW_H
+  const W            = Math.min(frames.length, 3000)
+  const step         = frames.length / W
+  const lowestRawOct = Math.floor(midiMin / 12)
 
   canvas.width  = W
   canvas.height = H
@@ -45,24 +64,26 @@ function drawPianoRoll(canvas: HTMLCanvasElement, frames: NoteFrame[], midiMin: 
   ctx.fillStyle = '#ffffff'
   ctx.fillRect(0, 0, W, H)
 
+  // 옥타브 경계(C음)마다 가로 점선 — 흰건반 좌표계 기준
   ctx.strokeStyle = 'rgba(0,0,0,0.18)'
   ctx.lineWidth = 1
   ctx.setLineDash([4, 4])
-  // C 음표 위치마다 가로 점선
   for (let midi = Math.ceil(midiMin / 12) * 12; midi <= midiMax; midi += 12) {
-    const y = H - (midi - midiMin) * ROW_H
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke()
+    const rawOct   = Math.floor(midi / 12)
+    const octBaseY = H - (rawOct - lowestRawOct) * 12 * ROW_H
+    ctx.beginPath(); ctx.moveTo(0, octBaseY); ctx.lineTo(W, octBaseY); ctx.stroke()
   }
   ctx.setLineDash([])
 
+  // 노트 블록 — noteYRange와 동일한 좌표계
   ctx.fillStyle = '#1a1a1a'
   for (let col = 0; col < W; col++) {
     const frame = frames[Math.floor(col * step)]
     if (!frame.midi || !frame.note) continue
     const midi = frame.midi
     if (midi < midiMin || midi > midiMax) continue
-    const y = H - (midi - midiMin + 1) * ROW_H
-    ctx.fillRect(col, y, 1, ROW_H)
+    const { top, height } = noteYRange(midi, midiMin, midiMax)
+    ctx.fillRect(col, top, 1, height)
   }
 }
 
@@ -350,13 +371,25 @@ export default function NotesPage() {
     const step     = frames.length / W
     const frameIdx = Math.min(frames.length - 1, Math.floor(canvasX * step))
 
-    // 마우스 Y → MIDI 번호 (세로 줌 없음, 1:1)
-    const H           = canvasHeight
-    const midiRow     = Math.floor((H - mouseY) / ROW_H)
-    const hoveredMidi = midiMin + midiRow
+    // 마우스 Y → MIDI 번호 (흰건반 균등 좌표계로 역산, 검은건반 우선)
+    let hoveredMidi: number | null = null
+    for (let m = midiMax; m >= midiMin; m--) {
+      const semi = m % 12
+      if (NATURAL.has(semi)) continue
+      const { top, height } = noteYRange(m, midiMin, midiMax)
+      if (mouseY >= top && mouseY < top + height) { hoveredMidi = m; break }
+    }
+    if (hoveredMidi === null) {
+      for (let m = midiMax; m >= midiMin; m--) {
+        const semi = m % 12
+        if (!NATURAL.has(semi)) continue
+        const { top, height } = noteYRange(m, midiMin, midiMax)
+        if (mouseY >= top && mouseY < top + height) { hoveredMidi = m; break }
+      }
+    }
 
     const frame = frames[frameIdx]
-    if (frame && frame.midi === hoveredMidi && frame.note) {
+    if (hoveredMidi !== null && frame && frame.midi === hoveredMidi && frame.note) {
       setTooltip({ x: e.clientX, y: e.clientY, note: frame.note })
     } else {
       setTooltip(null)
