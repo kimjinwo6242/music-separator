@@ -55,63 +55,89 @@ function midiToNote(midi: number): string {
   return NOTE_NAMES[midi % 12] + (Math.floor(midi / 12) - 1)
 }
 
+function hpsScore(mags: Float32Array, bin: number, half: number): number {
+  let product = mags[bin]
+  for (let h = 2; h <= 5; h++) {
+    const hBin = Math.round(bin * h)
+    if (hBin >= half) return 0
+    product *= mags[hBin]
+  }
+  return product
+}
+
 function detectPitch(mags: Float32Array, sr: number): number | null {
   const freqPerBin = sr / FFT_SIZE
   const minBin = Math.max(1, Math.round(60 / freqPerBin))
   const maxBin = Math.round(1400 / freqPerBin)
   const half = FFT_SIZE / 2
 
-  // HPS (Harmonic Product Spectrum) with 5 harmonics
   let best = 0, bestBin = -1
   for (let bin = minBin; bin < maxBin; bin++) {
-    let product = mags[bin]
-    for (let h = 2; h <= 5; h++) {
-      const hBin = Math.round(bin * h)
-      if (hBin >= half) { product = 0; break }
-      product *= mags[hBin]
-    }
-    if (product > best) { best = product; bestBin = bin }
+    const score = hpsScore(mags, bin, half)
+    if (score > best) { best = score; bestBin = bin }
   }
-
   if (bestBin === -1) return null
 
-  // 노이즈 기준: 해당 구간 평균의 5배 이상일 때만 유효
+  // 노이즈 기준
   let avg = 0
   for (let b = minBin; b < maxBin; b++) avg += mags[b]
   avg /= (maxBin - minBin)
   if (mags[bestBin] < avg * 5) return null
 
+  // 옥타브 아래 후보가 충분히 강하면 그쪽을 선택
+  // (HPS는 배음이 강할 때 실제 음보다 1옥타브 높은 bin을 선택하는 경향이 있음)
+  const subBin = Math.round(bestBin / 2)
+  if (subBin >= minBin) {
+    const subScore = hpsScore(mags, subBin, half)
+    // 하위 옥타브 점수가 25% 이상이면 하위 옥타브를 우선
+    if (subScore >= best * 0.25) {
+      bestBin = subBin
+    }
+  }
+
   return bestBin * freqPerBin
 }
 
-// 옥타브 오류 보정: 주변 프레임의 중앙값과 ±12 차이 나는 값을 수정
+// 옥타브 오류 보정 — 여러 번 반복해 안정화
 function fixOctaveErrors(frames: NoteFrame[]): NoteFrame[] {
-  const midis = frames.map(f => f.midi)
-  const N     = midis.length
-  const WIN   = 8   // 중앙값 계산 윈도우 (±8 프레임)
+  let midis = frames.map(f => f.midi)
+  const N = midis.length
 
-  const corrected = midis.map((midi, i) => {
-    if (midi === null) return null
+  // 3 pass: 매 pass마다 더 넓은 윈도우로 중앙값 계산 후 최선의 옥타브로 교정
+  const PASSES  = [
+    { win: 10, minNbrs: 4 },
+    { win: 20, minNbrs: 6 },
+    { win: 30, minNbrs: 8 },
+  ]
 
-    // 현재 프레임 제외하고 주변 중앙값 계산
-    const nbrs: number[] = []
-    for (let j = Math.max(0, i - WIN); j <= Math.min(N - 1, i + WIN); j++) {
-      if (j !== i && midis[j] !== null) nbrs.push(midis[j]!)
-    }
-    if (nbrs.length < 3) return midi
+  for (const { win, minNbrs } of PASSES) {
+    midis = midis.map((midi, i) => {
+      if (midi === null) return null
 
-    nbrs.sort((a, b) => a - b)
-    const median = nbrs[Math.floor(nbrs.length / 2)]
-    const diff   = midi - median
+      const nbrs: number[] = []
+      for (let j = Math.max(0, i - win); j <= Math.min(N - 1, i + win); j++) {
+        if (j !== i && midis[j] !== null) nbrs.push(midis[j]!)
+      }
+      if (nbrs.length < minNbrs) return midi
 
-    // ±12 반음(1 옥타브) 오차 → 반대 방향으로 보정
-    if (diff > 10)  return midi - 12
-    if (diff < -10) return midi + 12
-    return midi
-  })
+      nbrs.sort((a, b) => a - b)
+      const median = nbrs[Math.floor(nbrs.length / 2)]
+
+      // ±12, ±24 범위 후보 중 중앙값에 가장 가까운 옥타브를 선택
+      let best = midi
+      let bestDist = Math.abs(midi - median)
+      for (const offset of [-24, -12, 12, 24]) {
+        const candidate = midi + offset
+        if (candidate < 24 || candidate > 108) continue
+        const dist = Math.abs(candidate - median)
+        if (dist < bestDist) { bestDist = dist; best = candidate }
+      }
+      return best
+    })
+  }
 
   return frames.map((frame, i) => {
-    const newMidi = corrected[i]
+    const newMidi = midis[i]
     if (newMidi === frame.midi) return frame
     return {
       ...frame,
@@ -142,7 +168,6 @@ export async function analyzePitch(
   for (let i = 0; i < numFrames; i++) {
     const start = i * HOP_SIZE
 
-    // RMS로 무음 구간 제외
     let rms = 0
     for (let j = 0; j < FFT_SIZE; j++) rms += (samples[start + j] ?? 0) ** 2
     rms = Math.sqrt(rms / FFT_SIZE)
