@@ -45,12 +45,14 @@ function drawPianoRoll(canvas: HTMLCanvasElement, frames: NoteFrame[]) {
   ctx.fillStyle = '#ffffff'
   ctx.fillRect(0, 0, W, H)
 
-  ctx.strokeStyle = 'rgba(0,0,0,0.08)'
+  ctx.strokeStyle = 'rgba(0,0,0,0.18)'
   ctx.lineWidth = 1
+  ctx.setLineDash([4, 4])
   for (let midi = MIDI_MIN; midi <= MIDI_MAX; midi += 12) {
     const y = H - (midi - MIDI_MIN) * ROW_H
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke()
   }
+  ctx.setLineDash([])
 
   ctx.fillStyle = '#1a1a1a'
   for (let col = 0; col < W; col++) {
@@ -291,8 +293,8 @@ export default function NotesPage() {
                     {xLabels.filter(({ t }) => t > 0).map(({ t, x }) => (
                       <div
                         key={t}
-                        className="absolute inset-y-0 w-px bg-black/[0.07] pointer-events-none"
-                        style={{ left: x }}
+                        className="absolute inset-y-0 pointer-events-none"
+                        style={{ left: x, borderLeft: '1px dashed rgba(0,0,0,0.18)' }}
                       />
                     ))}
                   </div>
