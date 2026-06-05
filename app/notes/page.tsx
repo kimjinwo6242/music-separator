@@ -5,21 +5,10 @@ import { useRouter } from 'next/navigation'
 import { fileStore } from '@/app/lib/fileStore'
 import { analyzePitch, NoteFrame } from '@/app/lib/pitchDetection'
 
-const MIDI_MIN = 36
-const MIDI_MAX = 84
 const ROW_H    = 5
-const CANVAS_H = (MIDI_MAX - MIDI_MIN) * ROW_H
 const X_AXIS_H = 20
 const Y_AXIS_W = 40
-
-const Y_LABELS: { label: string; y: number }[] = (() => {
-  const arr: { label: string; y: number }[] = []
-  for (let midi = MIDI_MIN; midi <= MIDI_MAX; midi += 12) {
-    const octave = Math.floor(midi / 12) - 1
-    arr.push({ label: `C${octave}`, y: CANVAS_H - (midi - MIDI_MIN) * ROW_H })
-  }
-  return arr
-})()
+const PAD      = 3  // 최저/최고음 위아래 여백 (semitone)
 
 function getTimeInterval(dur: number): number {
   if (dur <= 15)  return 2
@@ -30,8 +19,17 @@ function getTimeInterval(dur: number): number {
   return 120
 }
 
-function drawPianoRoll(canvas: HTMLCanvasElement, frames: NoteFrame[]) {
-  const H    = (MIDI_MAX - MIDI_MIN) * ROW_H
+function detectMidiRange(frames: NoteFrame[]): [number, number] {
+  let lo = Infinity, hi = -Infinity
+  for (const f of frames) {
+    if (f.midi) { lo = Math.min(lo, f.midi); hi = Math.max(hi, f.midi) }
+  }
+  if (!isFinite(lo)) return [36, 84]
+  return [Math.max(0, lo - PAD), Math.min(127, hi + PAD)]
+}
+
+function drawPianoRoll(canvas: HTMLCanvasElement, frames: NoteFrame[], midiMin: number, midiMax: number) {
+  const H    = (midiMax - midiMin) * ROW_H
   const W    = Math.min(frames.length, 3000)
   const step = frames.length / W
 
@@ -45,8 +43,9 @@ function drawPianoRoll(canvas: HTMLCanvasElement, frames: NoteFrame[]) {
   ctx.strokeStyle = 'rgba(0,0,0,0.18)'
   ctx.lineWidth = 1
   ctx.setLineDash([4, 4])
-  for (let midi = MIDI_MIN; midi <= MIDI_MAX; midi += 12) {
-    const y = H - (midi - MIDI_MIN) * ROW_H
+  // C 음표 위치마다 가로 점선
+  for (let midi = Math.ceil(midiMin / 12) * 12; midi <= midiMax; midi += 12) {
+    const y = H - (midi - midiMin) * ROW_H
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke()
   }
   ctx.setLineDash([])
@@ -56,8 +55,8 @@ function drawPianoRoll(canvas: HTMLCanvasElement, frames: NoteFrame[]) {
     const frame = frames[Math.floor(col * step)]
     if (!frame.midi || !frame.note) continue
     const midi = frame.midi
-    if (midi < MIDI_MIN || midi > MIDI_MAX) continue
-    const y = H - (midi - MIDI_MIN + 1) * ROW_H
+    if (midi < midiMin || midi > midiMax) continue
+    const y = H - (midi - midiMin + 1) * ROW_H
     ctx.fillRect(col, y, 1, ROW_H)
   }
 }
@@ -75,6 +74,8 @@ export default function NotesPage() {
   const [done, setDone]               = useState(false)
   const [error, setError]             = useState('')
   const [canvasWidth, setCanvasWidth] = useState(0)
+  const [midiMin, setMidiMin]         = useState(36)
+  const [midiMax, setMidiMax]         = useState(84)
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const rafRef   = useRef<number>(0)
@@ -106,6 +107,18 @@ export default function NotesPage() {
   const phDragStartXRef      = useRef(0)
   const phDragStartAnchorRef = useRef(0)
 
+  // 동적 범위에서 계산되는 캔버스 높이 및 Y축 레이블
+  const canvasHeight = (midiMax - midiMin) * ROW_H
+  const yLabels = useMemo(() => {
+    const H   = (midiMax - midiMin) * ROW_H
+    const arr: { label: string; y: number }[] = []
+    for (let midi = Math.ceil(midiMin / 12) * 12; midi <= midiMax; midi += 12) {
+      const octave = Math.floor(midi / 12) - 1
+      arr.push({ label: `C${octave}`, y: H - (midi - midiMin) * ROW_H })
+    }
+    return arr
+  }, [midiMin, midiMax])
+
   // 렌더링에 사용되는 표시 너비
   const displayWidth = canvasWidth * zoomX
 
@@ -127,7 +140,10 @@ export default function NotesPage() {
     fileRef.current = file
 
     analyzePitch(file, setProgress).then(frames => {
-      drawPianoRoll(canvasRef.current!, frames)
+      const [lo, hi] = detectMidiRange(frames)
+      setMidiMin(lo)
+      setMidiMax(hi)
+      drawPianoRoll(canvasRef.current!, frames, lo, hi)
       setCanvasWidth(canvasRef.current!.width)
       setDone(true)
     }).catch(() => setError('음 분석에 실패했습니다.'))
@@ -397,8 +413,8 @@ export default function NotesPage() {
                   className="shrink-0 flex flex-col bg-[#f5f5f5] border-r border-black/10"
                   style={{ width: Y_AXIS_W }}
                 >
-                  <div className="relative overflow-hidden" style={{ height: CANVAS_H }}>
-                    {Y_LABELS.map(({ label, y }) => (
+                  <div className="relative overflow-hidden" style={{ height: canvasHeight }}>
+                    {yLabels.map(({ label, y }) => (
                       <span
                         key={label}
                         className="absolute right-1.5 text-[10px] font-mono text-black/40 select-none leading-none"
@@ -429,7 +445,7 @@ export default function NotesPage() {
                         imageRendering: 'pixelated',
                         display: 'block',
                         width:  displayWidth || 600,
-                        height: CANVAS_H,
+                        height: canvasHeight,
                       }}
                     />
                     {/* 플레이헤드 */}
