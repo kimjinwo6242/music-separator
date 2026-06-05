@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { fileStore } from '@/app/lib/fileStore'
 import { analyzePitch, NoteFrame } from '@/app/lib/pitchDetection'
@@ -15,13 +15,36 @@ function noteClass(note: string): string {
   return note.replace(/\d/, '')
 }
 
+const MIDI_MIN  = 36
+const MIDI_MAX  = 84
+const ROW_H     = 5
+const CANVAS_H  = (MIDI_MAX - MIDI_MIN) * ROW_H  // 240px
+const X_AXIS_H  = 20
+const Y_AXIS_W  = 40
+
+// C note labels at every octave boundary (grid lines)
+const Y_LABELS: { label: string; y: number }[] = (() => {
+  const arr: { label: string; y: number }[] = []
+  for (let midi = MIDI_MIN; midi <= MIDI_MAX; midi += 12) {
+    const octave = Math.floor(midi / 12) - 1
+    arr.push({ label: `C${octave}`, y: CANVAS_H - (midi - MIDI_MIN) * ROW_H })
+  }
+  return arr
+})()
+
+function getTimeInterval(dur: number): number {
+  if (dur <= 15)  return 2
+  if (dur <= 30)  return 5
+  if (dur <= 90)  return 10
+  if (dur <= 180) return 30
+  if (dur <= 600) return 60
+  return 120
+}
+
 function drawPianoRoll(canvas: HTMLCanvasElement, frames: NoteFrame[]) {
-  const MIDI_MIN = 36
-  const MIDI_MAX = 84
   const ROWS = MIDI_MAX - MIDI_MIN
-  const ROW_H = 5
-  const H = ROWS * ROW_H
-  const W = Math.min(frames.length, 3000)
+  const H    = ROWS * ROW_H
+  const W    = Math.min(frames.length, 3000)
   const step = frames.length / W
 
   canvas.width  = W
@@ -31,7 +54,7 @@ function drawPianoRoll(canvas: HTMLCanvasElement, frames: NoteFrame[]) {
   ctx.fillStyle = '#0d0d0f'
   ctx.fillRect(0, 0, W, H)
 
-  ctx.strokeStyle = 'rgba(255,255,255,0.06)'
+  ctx.strokeStyle = 'rgba(255,255,255,0.07)'
   ctx.lineWidth = 1
   for (let midi = MIDI_MIN; midi <= MIDI_MAX; midi += 12) {
     const y = H - (midi - MIDI_MIN) * ROW_H
@@ -56,30 +79,37 @@ function fmt(s: number) {
 export default function NotesPage() {
   const router = useRouter()
 
-  // 분석
   const canvasRef  = useRef<HTMLCanvasElement>(null)
-  const [fileName, setFileName] = useState('')
-  const [progress, setProgress] = useState(0)
-  const [done, setDone]         = useState(false)
-  const [error, setError]       = useState('')
-  const [topNotes, setTopNotes] = useState<{ note: string; count: number }[]>([])
+  const [fileName, setFileName]   = useState('')
+  const [progress, setProgress]   = useState(0)
+  const [done, setDone]           = useState(false)
+  const [error, setError]         = useState('')
+  const [canvasWidth, setCanvasWidth] = useState(0)
 
-  // 오디오
-  const audioRef       = useRef<HTMLAudioElement | null>(null)
-  const rafRef         = useRef<number>(0)
-  const fileRef        = useRef<File | null>(null)
+  const audioRef        = useRef<HTMLAudioElement | null>(null)
+  const rafRef          = useRef<number>(0)
+  const fileRef         = useRef<File | null>(null)
   const [playing, setPlaying]   = useState(false)
   const [audioDur, setAudioDur] = useState(0)
   const [volume, setVolume]     = useState(1)
   const [muted, setMuted]       = useState(false)
 
-  // DOM ref로 직접 업데이트 (re-render 없이 60fps)
-  const playheadRef       = useRef<HTMLDivElement>(null)
-  const seekFillRef       = useRef<HTMLDivElement>(null)
-  const timeRef           = useRef<HTMLSpanElement>(null)
+  const playheadRef        = useRef<HTMLDivElement>(null)
+  const seekFillRef        = useRef<HTMLDivElement>(null)
+  const timeRef            = useRef<HTMLSpanElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
 
-  // 분석
+  // X축 레이블: 시간 간격에 맞춰 계산
+  const xLabels = useMemo(() => {
+    if (!done || audioDur <= 0 || canvasWidth <= 0) return []
+    const interval = getTimeInterval(audioDur)
+    const labels: { t: number; x: number }[] = []
+    for (let t = 0; t <= audioDur; t += interval) {
+      labels.push({ t, x: (t / audioDur) * canvasWidth })
+    }
+    return labels
+  }, [done, audioDur, canvasWidth])
+
   useEffect(() => {
     const file = fileStore.get()
     if (!file) { router.replace('/upload'); return }
@@ -87,22 +117,12 @@ export default function NotesPage() {
     fileRef.current = file
 
     analyzePitch(file, setProgress).then(frames => {
-      const counts: Record<string, number> = {}
-      for (const f of frames) {
-        if (f.note) counts[f.note] = (counts[f.note] ?? 0) + 1
-      }
-      setTopNotes(
-        Object.entries(counts)
-          .map(([note, count]) => ({ note, count }))
-          .sort((a, b) => b.count - a.count)
-          .slice(0, 20)
-      )
       drawPianoRoll(canvasRef.current!, frames)
+      setCanvasWidth(canvasRef.current!.width)
       setDone(true)
     }).catch(() => setError('음 분석에 실패했습니다.'))
   }, [])
 
-  // 분석 완료 후 오디오 준비
   useEffect(() => {
     if (!done || !fileRef.current) return
     const url = URL.createObjectURL(fileRef.current)
@@ -128,14 +148,10 @@ export default function NotesPage() {
 
     if (canvasW > 0 && container) {
       const currentPx = pct * canvasW
-      const anchorX   = container.clientWidth / 5   // 화면 1/5 고정 지점
-
-      // 플레이헤드는 항상 캔버스 기준 절대 픽셀
+      const anchorX   = container.clientWidth / 5
       if (playheadRef.current) {
         playheadRef.current.style.left = `${currentPx}px`
       }
-
-      // 앵커 이전: 스크롤 0 유지 / 이후: 그래프가 스크롤되어 줄이 앵커에 고정된 것처럼 보임
       container.scrollLeft = Math.max(0, currentPx - anchorX)
     }
 
@@ -197,10 +213,10 @@ export default function NotesPage() {
 
   const handleRollClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!done) return
-    const canvas = canvasRef.current
+    const canvas    = canvasRef.current
     const container = scrollContainerRef.current
     if (!canvas || !container) return
-    const rect = container.getBoundingClientRect()
+    const rect   = container.getBoundingClientRect()
     const clickX = e.clientX - rect.left + container.scrollLeft
     seekTo(clickX / canvas.width)
   }
@@ -208,6 +224,8 @@ export default function NotesPage() {
   const handleSeekBarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     seekTo(Number(e.target.value) / 1000)
   }
+
+  const showXAxis = done && audioDur > 0
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-white flex flex-col">
@@ -231,28 +249,84 @@ export default function NotesPage() {
           <p className="text-red-400 text-sm">{error}</p>
         ) : (
           <>
-            {/* 피아노 롤 + 플레이헤드 */}
+            {/* 피아노 롤 */}
             <div>
               <p className="text-xs text-white/30 mb-2">피아노 롤 · C2 ~ C6</p>
-              {/* 가로 스크롤 wrapper */}
-              <div
-                ref={scrollContainerRef}
-                className="overflow-x-auto rounded-xl border border-white/[0.06]"
-              >
+
+              <div className="flex overflow-hidden rounded-xl border border-white/[0.06]">
+                {/* Y축 — 고정 (가로 스크롤 안함) */}
                 <div
-                  className="relative bg-black cursor-pointer"
-                  onClick={handleRollClick}
+                  className="shrink-0 flex flex-col bg-[#080809] border-r border-white/[0.06]"
+                  style={{ width: Y_AXIS_W }}
                 >
-                  <canvas
-                    ref={canvasRef}
-                    style={{ imageRendering: 'pixelated', display: 'block', minWidth: '600px' }}
-                  />
-                  {/* 플레이헤드 — px 기반이므로 left:0px 시작 */}
+                  <div className="relative overflow-hidden" style={{ height: CANVAS_H }}>
+                    {Y_LABELS.map(({ label, y }) => (
+                      <span
+                        key={label}
+                        className="absolute right-1.5 text-[10px] font-mono text-white/35 select-none leading-none"
+                        style={{ top: y, transform: 'translateY(-50%)' }}
+                      >
+                        {label}
+                      </span>
+                    ))}
+                  </div>
+                  {/* X축 높이 맞춤 */}
+                  {showXAxis && (
+                    <div
+                      className="border-t border-white/[0.06]"
+                      style={{ height: X_AXIS_H }}
+                    />
+                  )}
+                </div>
+
+                {/* 스크롤 영역 */}
+                <div ref={scrollContainerRef} className="flex-1 overflow-x-auto">
+                  {/* 캔버스 + 플레이헤드 + 세로 그리드 라인 */}
                   <div
-                    ref={playheadRef}
-                    className="absolute inset-y-0 w-px bg-white/70 pointer-events-none"
-                    style={{ left: '0px' }}
-                  />
+                    className="relative bg-black cursor-pointer"
+                    style={{ minWidth: 600 }}
+                    onClick={handleRollClick}
+                  >
+                    <canvas
+                      ref={canvasRef}
+                      style={{ imageRendering: 'pixelated', display: 'block', minWidth: '600px' }}
+                    />
+                    <div
+                      ref={playheadRef}
+                      className="absolute inset-y-0 w-px bg-white/70 pointer-events-none"
+                      style={{ left: '0px' }}
+                    />
+                    {/* 세로 그리드 — X축 눈금 위치 */}
+                    {xLabels.filter(({ t }) => t > 0).map(({ t, x }) => (
+                      <div
+                        key={t}
+                        className="absolute inset-y-0 w-px bg-white/[0.07] pointer-events-none"
+                        style={{ left: x }}
+                      />
+                    ))}
+                  </div>
+
+                  {/* X축 — 시간 레이블 */}
+                  {showXAxis && (
+                    <div
+                      className="relative bg-[#080809] border-t border-white/[0.06]"
+                      style={{ height: X_AXIS_H, minWidth: 600 }}
+                    >
+                      {xLabels.map(({ t, x }) => (
+                        <span
+                          key={t}
+                          className="absolute text-[9px] font-mono text-white/35 select-none"
+                          style={{
+                            left: x,
+                            top: '50%',
+                            transform: 'translate(-50%, -50%)',
+                          }}
+                        >
+                          {fmt(t)}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -261,7 +335,6 @@ export default function NotesPage() {
             {done && (
               <div className="space-y-2">
                 <div className="flex items-center gap-3">
-                  {/* 재생/정지 */}
                   <button
                     onClick={togglePlay}
                     disabled={audioDur === 0}
@@ -279,12 +352,10 @@ export default function NotesPage() {
                     )}
                   </button>
 
-                  {/* 현재 시간 */}
                   <span ref={timeRef} className="text-xs text-white/30 tabular-nums shrink-0 w-9 text-right">
                     0:00
                   </span>
 
-                  {/* 시크바 */}
                   <div className="relative flex-1 h-1 group">
                     <div className="absolute inset-0 rounded-full bg-white/10" />
                     <div ref={seekFillRef} className="absolute inset-y-0 left-0 rounded-full bg-violet-500" style={{ width: '0%' }} />
@@ -295,13 +366,11 @@ export default function NotesPage() {
                     />
                   </div>
 
-                  {/* 전체 시간 */}
                   <span className="text-xs text-white/25 tabular-nums shrink-0 w-9">
                     {fmt(audioDur)}
                   </span>
                 </div>
 
-                {/* 볼륨 행 */}
                 <div className="flex items-center gap-3 pl-1">
                   <button onClick={toggleMute} className="shrink-0 text-white/30 hover:text-white/60 transition-colors">
                     {muted || volume === 0 ? (
@@ -356,34 +425,6 @@ export default function NotesPage() {
                   />
                 </div>
               </div>
-            )}
-
-            {/* 감지된 음 목록 */}
-            {done && topNotes.length > 0 && (
-              <div>
-                <p className="text-xs text-white/30 mb-3">감지된 음 (빈도순) · {topNotes.length}개</p>
-                <div className="grid grid-cols-5 gap-2 max-h-72 overflow-y-auto pr-1">
-                  {topNotes.map(({ note, count }) => {
-                    const color = NOTE_COLORS[noteClass(note)] ?? '#a29bfe'
-                    return (
-                      <div
-                        key={note}
-                        className="flex flex-col items-center gap-2 py-3 px-2 rounded-xl border border-white/[0.06] bg-white/[0.03]"
-                      >
-                        <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: color }} />
-                        <span className="text-base font-mono font-bold text-white/85 tracking-tight">{note}</span>
-                        <span className="text-xs text-white/25 tabular-nums">{count}</span>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-
-            {done && topNotes.length === 0 && (
-              <p className="text-sm text-white/30 text-center py-8">
-                감지된 음이 없습니다. 단음 악기(피아노, 기타, 보컬 등)가 포함된 파일에서 잘 작동합니다.
-              </p>
             )}
           </>
         )}
