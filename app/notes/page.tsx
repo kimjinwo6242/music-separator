@@ -471,6 +471,50 @@ export default function NotesPage() {
           <span className="text-xs text-white/25 tabular-nums w-8">
             {Math.round((muted ? 0 : volume) * 100)}%
           </span>
+
+          <div className="w-px h-4 bg-white/10 mx-1" />
+
+          {/* 줌 컨트롤 */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => updateZoom(zoomX / 1.5)}
+              disabled={zoomX <= 0.25}
+              className="w-6 h-6 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white/80 text-sm transition-colors disabled:opacity-30"
+            >−</button>
+
+            {editingZoom ? (
+              <div className="flex items-center">
+                <input
+                  ref={zoomInputRef}
+                  type="text"
+                  inputMode="numeric"
+                  value={zoomInput}
+                  onChange={e => setZoomInput(e.target.value.replace(/[^0-9]/g, ''))}
+                  onBlur={() => setEditingZoom(false)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') commitZoomEdit()
+                    else if (e.key === 'Escape') setEditingZoom(false)
+                  }}
+                  className="w-10 bg-white/10 border border-white/20 rounded text-[11px] font-mono text-white/80 text-center tabular-nums outline-none px-1 py-0.5"
+                />
+                <span className="text-[11px] text-white/35 ml-0.5">%</span>
+              </div>
+            ) : (
+              <button
+                onClick={startZoomEdit}
+                title="클릭해서 직접 입력"
+                className="w-14 text-[11px] font-mono text-white/35 hover:text-white/70 text-center tabular-nums hover:bg-white/5 rounded py-0.5 transition-colors"
+              >
+                {Math.round(zoomX * 100)}%
+              </button>
+            )}
+
+            <button
+              onClick={() => updateZoom(zoomX * 1.5)}
+              disabled={zoomX >= 8}
+              className="w-6 h-6 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white/80 text-sm transition-colors disabled:opacity-30"
+            >+</button>
+          </div>
         </div>
       )}
 
@@ -480,52 +524,7 @@ export default function NotesPage() {
         ) : (
           <>
             <div>
-              {/* 툴바 */}
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs text-white/30">피아노 롤 · C2 ~ C6</p>
-                {done && (
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => updateZoom(zoomX / 1.5)}
-                      disabled={zoomX <= 0.25}
-                      className="w-6 h-6 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white/80 text-sm transition-colors disabled:opacity-30"
-                    >−</button>
-
-                    {editingZoom ? (
-                      <div className="relative w-14 flex items-center">
-                        <input
-                          ref={zoomInputRef}
-                          type="text"
-                          inputMode="numeric"
-                          value={zoomInput}
-                          onChange={e => setZoomInput(e.target.value.replace(/[^0-9]/g, ''))}
-                          onBlur={() => setEditingZoom(false)}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') commitZoomEdit()
-                            else if (e.key === 'Escape') setEditingZoom(false)
-                          }}
-                          className="w-10 bg-white/10 border border-white/20 rounded text-[11px] font-mono text-white/80 text-center tabular-nums outline-none px-1 py-0.5"
-                        />
-                        <span className="text-[11px] text-white/35 ml-0.5">%</span>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={startZoomEdit}
-                        title="클릭해서 직접 입력"
-                        className="w-14 text-[11px] font-mono text-white/35 hover:text-white/70 text-center tabular-nums hover:bg-white/5 rounded py-0.5 transition-colors"
-                      >
-                        {Math.round(zoomX * 100)}%
-                      </button>
-                    )}
-
-                    <button
-                      onClick={() => updateZoom(zoomX * 1.5)}
-                      disabled={zoomX >= 8}
-                      className="w-6 h-6 rounded bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white/80 text-sm transition-colors disabled:opacity-30"
-                    >+</button>
-                  </div>
-                )}
-              </div>
+              <p className="text-xs text-white/30 mb-2">피아노 롤 · C2 ~ C6</p>
 
               <div className="flex overflow-hidden rounded-xl border border-black/10">
                 {/* Y축 — 고정 */}
